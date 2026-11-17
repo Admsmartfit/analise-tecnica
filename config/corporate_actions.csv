@@ -1,0 +1,3 @@
+# Eventos corporativos conferidos com a B3 (PRD 1.1.5 / Decisões: tabela própria).
+# factor multiplica os preços ANTERIORES ao ex_date. Dividendo: 1 - valor/fechamento_anterior; desdobro 2:1: 0.5; grupamento 10:1: 10.
+ticker,ex_date,action_type,value,factor

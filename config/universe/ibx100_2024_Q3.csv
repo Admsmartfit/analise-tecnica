@@ -1,0 +1,83 @@
+ticker,company_name,sector
+ABEV3,AMBEV S/A,Consumo Nao Ciclico
+ALOS3,ALLOS,Financeiro
+ASAI3,ASSAI,Consumo Nao Ciclico
+AURE3,AUREN,Utilidade Publica
+AZUL4,AZUL,Bens Industriais
+B3SA3,B3,Financeiro
+BBAS3,BANCO DO BRASIL,Financeiro
+BBDC3,BRADESCO,Financeiro
+BBDC4,BRADESCO,Financeiro
+BBSE3,BB SEGURIDADE,Financeiro
+BEEF3,MINERVA,Consumo Nao Ciclico
+BPAC11,BTG PACTUAL,Financeiro
+BRAP4,BRADESPAR,Materiais Basicos
+BRFS3,BRF,Consumo Nao Ciclico
+BRKM5,BRASKEM,Materiais Basicos
+CCRO3,CCR SA,Bens Industriais
+CIEL3,CIELO,Financeiro
+CMIG4,CEMIG,Utilidade Publica
+CMIN3,CSNMINERACAO,Materiais Basicos
+COGN3,COGNA ON,Consumo Ciclico
+CPFE3,CPFL ENERGIA,Utilidade Publica
+CPLE6,COPEL,Utilidade Publica
+CRFB3,CARREFOUR BR,Consumo Nao Ciclico
+CSAN3,COSAN,Petroleo Gas e Biocombustiveis
+CSNA3,SID NACIONAL,Materiais Basicos
+CVCB3,CVC BRASIL,Consumo Ciclico
+CYRE3,CYRELA REALT,Consumo Ciclico
+DXCO3,DEXCO,Materiais Basicos
+EGIE3,ENGIE BRASIL,Utilidade Publica
+ELET3,ELETROBRAS,Utilidade Publica
+ELET6,ELETROBRAS,Utilidade Publica
+EMBR3,EMBRAER,Bens Industriais
+ENGI11,ENERGISA,Utilidade Publica
+EQTL3,EQUATORIAL,Utilidade Publica
+EZTC3,EZTEC,Consumo Ciclico
+FLRY3,FLEURY,Saude
+GGBR4,GERDAU,Materiais Basicos
+GOAU4,GERDAU MET,Materiais Basicos
+HAPV3,HAPVIDA,Saude
+HYPE3,HYPERA,Saude
+IGTI11,IGUATEMI,Financeiro
+IRBR3,IRBBRASIL RE,Financeiro
+ITSA4,ITAUSA,Financeiro
+ITUB4,ITAU UNIBANCO,Financeiro
+JBSS3,JBS,Consumo Nao Ciclico
+KLBN11,KLABIN S/A,Materiais Basicos
+LREN3,LOJAS RENNER,Consumo Ciclico
+LWSA3,LIGHT,Utilidade Publica
+MGLU3,MAGAZ LUIZA,Consumo Ciclico
+MRFG3,MARFRIG,Consumo Nao Ciclico
+MRVE3,MRV,Consumo Ciclico
+MULT3,MULTIPLAN,Financeiro
+NTCO3,NATURA,Consumo Nao Ciclico
+PCAR3,PAO DE ACUCAR,Consumo Nao Ciclico
+PETR3,PETROBRAS,Petroleo Gas e Biocombustiveis
+PETR4,PETROBRAS,Petroleo Gas e Biocombustiveis
+PETZ3,PETZ,Consumo Ciclico
+PRIO3,PETRORIO,Petroleo Gas e Biocombustiveis
+RADL3,RAIADROGASIL,Saude
+RAIL3,RUMO S.A.,Bens Industriais
+RAIZ4,RAIZEN,Petroleo Gas e Biocombustiveis
+RDOR3,REDE D OR,Saude
+RECV3,PETRORECONCAVO,Petroleo Gas e Biocombustiveis
+RENT3,LOCALIZA,Consumo Ciclico
+SANB11,SANTANDER BR,Financeiro
+SBSP3,SABESP,Utilidade Publica
+SLCE3,SLC AGRICOLA,Consumo Nao Ciclico
+SMTO3,SAO MARTINHO,Consumo Nao Ciclico
+SOMA3,GRUPO SOMA,Consumo Ciclico
+SUZB3,SUZANO S.A.,Materiais Basicos
+TAEE11,TAESA,Utilidade Publica
+TIMS3,TIM,Telecomunicacoes
+TOTS3,TOTVS,Tecnologia da Informacao
+UGPA3,ULTRAPAR,Petroleo Gas e Biocombustiveis
+USIM5,USIMINAS,Materiais Basicos
+VALE3,VALE,Materiais Basicos
+VAMO3,VAMOS,Bens Industriais
+VBBR3,VIBRA,Petroleo Gas e Biocombustiveis
+VIVA3,VIVARA S.A.,Consumo Ciclico
+VIVT3,TELEF BRASIL,Telecomunicacoes
+WEGE3,WEG,Bens Industriais
+YDUQ3,YDUQS PART,Consumo Ciclico

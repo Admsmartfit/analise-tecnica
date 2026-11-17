@@ -1,0 +1,376 @@
+"""Command Line Interface for Trading System B3."""
+from __future__ import annotations
+
+import argparse
+import platform
+import shutil
+import struct
+import sys
+from datetime import date
+from pathlib import Path
+
+from rich.console import Console
+from rich.table import Table
+
+from ts.core.config import load_settings
+from ts.core.errors import ConnectivityError
+from ts.core.logging import setup_logging
+from ts.data.mt5_gateway import MT5Gateway
+from ts.data.ohlcv_store import OhlcvStore
+from ts.data.sync import sync_universe
+from ts.data.universe import universe_on
+from ts.persistence.db import DatabaseManager
+
+console = Console()
+
+
+def doctor_command(args: argparse.Namespace) -> int:
+    """Run comprehensive health checks on environment, dependencies, terminal and permissions."""
+    console.print("\n[bold cyan]Trading System B3 — Doctor Diagnostic Check[/bold cyan]\n")
+
+    table = Table(title="Diagnostic Results", show_lines=True)
+    table.add_column("Check Item", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("Details")
+
+    # 1. Python Architecture
+    bit_size = struct.calcsize("P") * 8
+    py_ver = platform.python_version()
+    if bit_size == 64:
+        table.add_row("Python 64-bit", "[green]PASS[/green]", f"Python {py_ver} (64-bit)")
+    else:
+        table.add_row("Python 64-bit", "[red]FAIL[/red]", f"Python {py_ver} ({bit_size}-bit, 64-bit required)")
+
+    # 2. Settings Config
+    settings = None
+    try:
+        settings = load_settings()
+        table.add_row("Configuration", "[green]PASS[/green]", f"Mode: {settings.execution.mode}")
+    except Exception as e:
+        table.add_row("Configuration", "[red]FAIL[/red]", str(e))
+        console.print(table)
+        return 2
+
+    # 3. Disk Space & Data Directory Permissions
+    try:
+        data_p = Path(settings.system.data_dir)
+        data_p.mkdir(parents=True, exist_ok=True)
+        test_file = data_p / ".write_test"
+        test_file.write_text("ok")
+        test_file.unlink()
+
+        total, used, free = shutil.disk_usage(data_p)
+        free_gb = free / (1024**3)
+        table.add_row(
+            "Disk & Write Permissions",
+            "[green]PASS[/green]",
+            f"Write OK | Free space: {free_gb:.1f} GB",
+        )
+    except Exception as e:
+        table.add_row("Disk & Write Permissions", "[red]FAIL[/red]", str(e))
+
+    # 4. MetaTrader 5 Connectivity
+    try:
+        # If in paper mode or no MT5 terminal available, gateway will inform
+        gateway = MT5Gateway(settings=settings)
+        try:
+            gateway.connect()
+            health = gateway.health()
+            if health.ok and (health.trade_allowed or settings.execution.mode == "paper"):
+                conn_status = "[green]PASS[/green]"
+                detail_str = (
+                    f"Terminal: {health.terminal_version} | Connected: {health.connected} | "
+                    f"AlgoTrading: {health.trade_allowed} | tick age {settings.mt5.heartbeat_symbol}: {health.tick_age_seconds}s"
+                )
+            else:
+                conn_status = "[yellow]WARN[/yellow]"
+                detail_str = f"Terminal reachable but status not fully OK: {health.details}"
+            table.add_row("MetaTrader 5 Terminal", conn_status, detail_str)
+            gateway.shutdown()
+        except ConnectivityError as ce:
+            table.add_row(
+                "MetaTrader 5 Terminal",
+                "[yellow]WARN[/yellow]",
+                f"MT5 terminal not reachable: {ce}",
+            )
+    except Exception as e:
+        table.add_row("MetaTrader 5 Terminal", "[red]FAIL[/red]", str(e))
+
+    # 5. Database & Migrations
+    try:
+        db = DatabaseManager(settings.system.db_path)
+        conn = db.get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM schema_migrations;")
+        mig_count = cur.fetchone()[0]
+        table.add_row("SQLite & Migrations", "[green]PASS[/green]", f"{mig_count} migrations applied")
+    except Exception as e:
+        table.add_row("SQLite & Migrations", "[red]FAIL[/red]", str(e))
+
+    # 6. Calendar coverage and strategy config
+    try:
+        from ts.core.calendar import B3Calendar
+        from ts.core.config import load_strategy_config
+
+        cal = B3Calendar()
+        last_holiday_year = max(h.year for h in cal.holidays)
+        _, cfg_hash = load_strategy_config()
+        status = "[green]PASS[/green]" if last_holiday_year > date.today().year else "[yellow]WARN[/yellow]"
+        table.add_row("Calendar / strategy.yaml", status,
+                      f"Holidays until {last_holiday_year} | strategy hash {cfg_hash} | mode {settings.execution.mode}")
+    except Exception as e:
+        table.add_row("Calendar / strategy.yaml", "[red]FAIL[/red]", str(e))
+
+    # 7. MetaTrader5 package (Windows only)
+    try:
+        import importlib.metadata as md
+
+        table.add_row("MetaTrader5 package", "[green]PASS[/green]", md.version("MetaTrader5"))
+    except Exception:
+        table.add_row("MetaTrader5 package", "[yellow]WARN[/yellow]", "not installed (required on the trading machine)")
+
+    console.print(table)
+    return 0
+
+
+def backtest_command(args: argparse.Namespace) -> int:
+    """Run a backtest (or the full G0 walk-forward) on the Parquet store and write the report."""
+    import json
+
+    from ts.backtest.engine import BacktestEngine
+    from ts.backtest.walkforward import WalkForwardEngine
+    from ts.core.config import load_costs_config, load_strategy_config
+    from ts.data.corporate_actions import CorporateActionsStore
+    from ts.data.loader import load_signal_bars
+
+    settings = load_settings()
+    setup_logging(settings.system.logs_dir, settings.logging.level, settings.logging.json_lines)
+    cfg, cfg_hash = load_strategy_config()
+    costs = load_costs_config()
+    store = OhlcvStore(f"{settings.system.data_dir}/ohlcv/d1")
+    tickers = sorted(p.stem for p in store.data_dir.glob("*.parquet") if p.stem != settings.mt5.ibov_symbol.upper())
+    bars = load_signal_bars(store, tickers, CorporateActionsStore(settings.system.corporate_actions_path))
+    ibov = load_signal_bars(store, [settings.mt5.ibov_symbol]).get(settings.mt5.ibov_symbol.upper())
+    if ibov is None:
+        console.print("[red]IBOV not found in the store — run sync first[/red]")
+        return 4
+    universe_fn = universe_on if not args.no_universe else None
+    out_dir = Path(settings.system.reports_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    capital = settings.execution.reference_capital
+
+    if args.g0:
+        wf = WalkForwardEngine(cfg, costs, capital)
+        rep = wf.run_full_g0(bars, ibov, universe_fn=universe_fn)
+        path = out_dir / f"G0_{date.today().isoformat()}_{cfg_hash}.md"
+        path.write_text(rep.summary_markdown, encoding="utf-8")
+        console.print(rep.summary_markdown)
+        console.print(f"[bold]{'APROVADO' if rep.approved else 'REPROVADO'}[/bold] — {path}")
+        return 0
+
+    eng = BacktestEngine(cfg, costs, capital)
+    start = date.fromisoformat(args.start) if args.start else None
+    end = date.fromisoformat(args.end) if args.end else None
+    res = eng.run(bars, ibov, start, end, universe_fn=universe_fn)
+    wf = WalkForwardEngine(cfg, costs, capital)
+    rep = wf.generate_g0_report(res)
+    path = out_dir / f"backtest_{date.today().isoformat()}_{cfg_hash}.md"
+    path.write_text(rep.summary_markdown + f"\n\nIR estimado no período: R$ {res.total_tax:,.2f}\n", encoding="utf-8")
+    # Reference distribution of R per setup for the live setup monitor (PRD 1.2.5)
+    ref_dir = Path(settings.system.data_dir) / "reference"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    by_setup: dict[str, list[float]] = {}
+    for t in res.trades:
+        by_setup.setdefault(t.setup, []).append(t.r_multiple)
+    (ref_dir / "setup_r.json").write_text(json.dumps({"config_hash": cfg_hash, **by_setup}), encoding="utf-8")
+    console.print(rep.summary_markdown)
+    console.print(f"Relatório: {path}")
+    return 0
+
+
+def deadman_command(args: argparse.Namespace) -> int:
+    from ts.app.routines import deadman_routine
+
+    return deadman_routine(date.fromisoformat(args.asof) if args.asof else None)
+
+
+def weekly_report_command(args: argparse.Namespace) -> int:
+    from ts.app.weekly_report import generate_weekly_report
+
+    settings = load_settings()
+    week_end = date.fromisoformat(args.asof) if args.asof else None
+    text = generate_weekly_report(settings.system.db_path, week_end, send_telegram=not args.no_telegram)
+    out = Path(settings.system.reports_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"weekly_{(week_end or date.today()).isoformat()}.md").write_text(text, encoding="utf-8")
+    console.print(text)
+    return 0
+
+
+def sync_command(args: argparse.Namespace) -> int:
+    """Synchronize market data bars."""
+    from ts.core.lock import LockBusyError, ProcessLock
+
+    settings = load_settings()
+    setup_logging(settings.system.logs_dir, settings.logging.level, settings.logging.json_lines)
+    asof_date = date.fromisoformat(args.asof) if args.asof else date.today()
+    tickers = [t.strip().upper() for t in args.tickers.split(",")] if args.tickers else None
+
+    console.print(f"[bold green]Starting sync for asof={asof_date} (full={args.full})...[/bold green]")
+    try:
+        with ProcessLock(settings.system.lock_path, timeout_s=600):
+            report = sync_universe(asof=asof_date, tickers=tickers, full=args.full, settings=settings)
+    except LockBusyError as e:
+        console.print(f"[red]{e}[/red]")
+        return 5
+    except ConnectivityError as e:
+        console.print(f"[red]Connectivity error: {e}[/red]")
+        return 3
+
+    console.print(
+        f"[bold]Sync completed with status: {report.status}[/bold] (Success: {len(report.successful_tickers)}/{report.total_tickers})"
+    )
+    if report.failed_tickers:
+        console.print(f"[yellow]Failed tickers: {report.failed_tickers}[/yellow]")
+    if report.blocked_tickers:
+        console.print(f"[red]Blocked tickers: {report.blocked_tickers}[/red]")
+
+    return report.exit_code
+
+
+def data_report_command(args: argparse.Namespace) -> int:
+    """Display data coverage and quality report in a Rich table."""
+    settings = load_settings()
+    store = OhlcvStore(f"{settings.system.data_dir}/ohlcv/d1")
+
+    today = date.today()
+    active_tickers = universe_on(today)
+    active_tickers.append(settings.mt5.ibov_symbol)
+
+    table = Table(title="Data Quality & Store Coverage", show_lines=True)
+    table.add_column("Ticker", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("Bars Count", justify="right")
+    table.add_column("First Date")
+    table.add_column("Latest Date")
+
+    for ticker in sorted(active_tickers):
+        if store.exists(ticker):
+            df = store.read(ticker)
+            if not df.empty:
+                cnt = len(df)
+                min_d = str(df["session_date"].min())
+                max_d = str(df["session_date"].max())
+                table.add_row(ticker, "[green]OK[/green]", str(cnt), min_d, max_d)
+            else:
+                table.add_row(ticker, "[yellow]EMPTY[/yellow]", "0", "-", "-")
+        else:
+            table.add_row(ticker, "[red]MISSING[/red]", "0", "-", "-")
+
+    console.print(table)
+    return 0
+
+
+def preopen_command(args: argparse.Namespace) -> int:
+    """Run pre-market routine: reconcile positions and submit opening-auction orders."""
+    from ts.app.routines import preopen_routine
+
+    asof_date = date.fromisoformat(args.asof) if args.asof else None
+    return preopen_routine(session_date=asof_date)
+
+
+def eod_command(args: argparse.Namespace) -> int:
+    """Run end-of-day routine: sync data, generate signals, plan orders, send report."""
+    from ts.app.routines import eod_routine
+
+    asof_date = date.fromisoformat(args.asof) if args.asof else None
+    return eod_routine(session_date=asof_date)
+
+
+def watchdog_command(args: argparse.Namespace) -> int:
+    """Run watchdog: heartbeat, tick-age check, dead-man switch."""
+    from ts.app.routines import watchdog_routine
+
+    asof_date = date.fromisoformat(args.asof) if args.asof else None
+    return watchdog_routine(session_date=asof_date)
+
+
+def backup_command(args: argparse.Namespace) -> int:
+    """Run backup routine: SQLite backup + Parquet integrity check."""
+    from ts.app.routines import backup_routine
+
+    asof_date = date.fromisoformat(args.asof) if args.asof else None
+    return backup_routine(session_date=asof_date)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Trading System B3 CLI")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Doctor
+    subparsers.add_parser("doctor", help="Run environment diagnostic check")
+
+    # Sync
+    sync_p = subparsers.add_parser("sync", help="Synchronize OHLCV daily data")
+    sync_p.add_argument("--asof", type=str, help="Target session date (YYYY-MM-DD)")
+    sync_p.add_argument("--tickers", type=str, help="Comma-separated tickers list")
+    sync_p.add_argument("--full", action="store_true", help="Force full download from 2019")
+
+    # Data Report
+    subparsers.add_parser("data-report", help="Show data coverage report")
+
+    # Pre-open routine
+    preopen_p = subparsers.add_parser("preopen", help="Pre-market: reconcile and submit opening-auction orders")
+    preopen_p.add_argument("--asof", type=str, help="Session date (YYYY-MM-DD, default: today)")
+
+    # EOD routine
+    eod_p = subparsers.add_parser("eod", help="End-of-day: sync, signals, risk, plan orders, Telegram report")
+    eod_p.add_argument("--asof", type=str, help="Session date (YYYY-MM-DD, default: today)")
+
+    # Watchdog
+    watchdog_p = subparsers.add_parser("watchdog", help="Watchdog: heartbeat and dead-man switch")
+    watchdog_p.add_argument("--asof", type=str, help="Session date (YYYY-MM-DD, default: today)")
+
+    # Backup
+    backup_p = subparsers.add_parser("backup", help="Backup SQLite and verify Parquet files")
+    backup_p.add_argument("--asof", type=str, help="Session date (YYYY-MM-DD, default: today)")
+
+    bt_p = subparsers.add_parser("backtest", help="Backtest on the Parquet store (use --g0 for the full G0 gate)")
+    bt_p.add_argument("--start", type=str)
+    bt_p.add_argument("--end", type=str)
+    bt_p.add_argument("--g0", action="store_true", help="Walk-forward + PBO + DSR + plateau + regimes")
+    bt_p.add_argument("--no-universe", action="store_true", help="Ignore historical IBX-100 composition")
+
+    dm_p = subparsers.add_parser("deadman", help="20:30 dead-man switch: alert if EOD did not finish")
+    dm_p.add_argument("--asof", type=str)
+
+    wr_p = subparsers.add_parser("weekly-report", help="Weekly G1/G2 report")
+    wr_p.add_argument("--asof", type=str, help="Week end (Friday)")
+    wr_p.add_argument("--no-telegram", action="store_true")
+
+    args = parser.parse_args()
+
+    if args.command == "backtest":
+        sys.exit(backtest_command(args))
+    if args.command == "deadman":
+        sys.exit(deadman_command(args))
+    if args.command == "weekly-report":
+        sys.exit(weekly_report_command(args))
+    if args.command == "doctor":
+        sys.exit(doctor_command(args))
+    elif args.command == "sync":
+        sys.exit(sync_command(args))
+    elif args.command == "data-report":
+        sys.exit(data_report_command(args))
+    elif args.command == "preopen":
+        sys.exit(preopen_command(args))
+    elif args.command == "eod":
+        sys.exit(eod_command(args))
+    elif args.command == "watchdog":
+        sys.exit(watchdog_command(args))
+    elif args.command == "backup":
+        sys.exit(backup_command(args))
+
+
+if __name__ == "__main__":
+    main()

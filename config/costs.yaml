@@ -1,0 +1,9 @@
+costs:
+  effective_date: "2024-01-01"
+  b3_emoluments_pct: 0.000300       # 0.0300% (negociação + liquidação)
+  brokerage_per_order: 0.0          # Corretagem zero (padrão XP/Clear digital)
+  iss_pct: 0.0                      # ISS sobre corretagem
+  slippage_pct: 0.0005              # 0.05% slippage padrão no leilão / execução
+  tax:
+    swing_trade_rate: 0.15          # 15% IR sobre ganho líquido
+    monthly_sales_exemption_brl: 20000.0  # Isenção para vendas de ações até R$ 20k no mês

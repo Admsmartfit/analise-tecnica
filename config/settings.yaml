@@ -1,0 +1,36 @@
+system:
+  root_path: "C:\\TradingSystem"
+  data_dir: "data"
+  db_path: "data/db/trading.db"
+  logs_dir: "logs"
+  reports_dir: "reports"
+  corporate_actions_path: "config/corporate_actions.csv"
+  lock_path: "data/ts.lock"
+
+execution:
+  mode: "paper"  # "paper" or "live"
+  magic_number: 20261117
+  client_id_prefix: "TS"
+  fractional_shares: false
+  reference_capital: 100000.0
+
+mt5:
+  terminal_path: "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+  server: "XP-PRD"
+  login: 0
+  timeout_ms: 60000
+  ibov_symbol: "IBOV"
+  keyring_service: "ts-mt5"
+  server_tz: "America/Sao_Paulo"   # confirmar no Sprint 1 (teste de sanidade do fuso)
+  heartbeat_symbol: "PETR4"
+  max_tick_age_seconds: 120
+
+logging:
+  level: "INFO"
+  json_lines: true
+  directory: "logs"
+
+telegram:
+  enabled: false
+  chat_id: ""
+  keyring_service: "ts-telegram"

@@ -1,0 +1,141 @@
+min_history_bars: 260   # PRD 1.1.5: ativos com menos de 260 barras ficam fora do universo
+asset_trend_sma: 200
+
+market_filter:
+  ibov_sma_long: 200
+  ibov_sma_short: 50
+  require_bull_regime: true
+
+pivot:
+  window_n: 2
+  magnitude_atr_k: 1.0
+  atr_period: 14
+
+setups:
+  A:
+    name: "Pivo_de_Alta"
+    trade_class: "TREND"
+    enabled: true
+    adx_threshold: 20.0
+    rvol_min: 1.5
+    entry_type: "OPEN_AUCTION"
+    trailing_chandelier_k: 3.0
+    chandelier_atr_period: 22
+    stagnation_bars: 15
+    stagnation_mfe_r: 1.0
+
+  B:
+    name: "Pullback"
+    trade_class: "MEAN_REVERSION"
+    enabled: true
+    ema_short: 20
+    sma_medium: 50
+    pullback_bars_min: 2
+    pullback_bars_max: 5
+    rsi_period: 14
+    rsi_max: 45.0
+    adx_recent_bars: 10
+    adx_threshold: 20.0
+    entry_type: "BUY_STOP"
+    partial_target_r: 1.5
+    partial_pct: 0.50
+    final_target_r: 3.0
+    time_stop_bars: 8
+    min_rr_filter: 3.0
+
+  C:
+    name: "Donchian_20_10"
+    trade_class: "TREND"
+    enabled: true
+    donchian_entry_period: 20
+    donchian_exit_period: 10
+    adx_threshold: 20.0
+    rvol_min: 1.5
+    entry_type: "OPEN_AUCTION"
+    stagnation_bars: 15
+    stagnation_mfe_r: 1.0
+
+  D:
+    name: "Bollinger_Squeeze"
+    trade_class: "TREND"
+    enabled: true
+    bollinger_period: 20
+    bollinger_std: 2.0
+    bollinger_ddof: 0
+    squeeze_lookback: 120
+    squeeze_percentile_q: 10.0
+    rvol_min: 1.5
+    entry_type: "OPEN_AUCTION"
+    trailing_chandelier_k: 3.0
+    chandelier_atr_period: 22
+    stagnation_bars: 15
+    stagnation_mfe_r: 1.0
+
+  E:
+    name: "Divergencia_Alta"
+    trade_class: "MEAN_REVERSION"
+    enabled: true
+    bars_between_pivots_min: 5
+    bars_between_pivots_max: 30
+    price_tolerance: 1.005
+    rsi_delta_min: 3.0
+    rsi_period: 14
+    entry_type: "BUY_STOP"
+    partial_target_r: 1.5
+    partial_pct: 0.50
+    final_target_r: 3.0
+    time_stop_bars: 8
+    min_rr_filter: 3.0
+
+risk:
+  risk_per_trade_pct: 0.01
+  stop_atr_min_k: 1.0
+  stop_atr_max_k: 3.0
+  capital_cap_pct: 0.20
+  gap_cap_pct: 0.02
+  default_gap_p01: 0.035
+  gap_lookback_days: 500
+  round_lot: 100
+  tick_size: 0.01
+  min_risk_efficiency: 0.70
+  auction_limit_protection_pct: 0.03
+
+portfolio:
+  max_heat_pct: 0.05
+  max_correlated_risk_pct: 0.03
+  max_positions_per_cluster: 2
+  cluster_correlation_threshold: 0.70
+  max_beta: 1.20
+  correlation_lookback_days: 60
+  beta_lookback_days: 120
+  relative_strength_days: 60
+
+regime:
+  lookback_years: 5
+  realized_vol_days: 20
+  tiers:
+    - max_percentile: 50.0
+      risk_multiplier: 1.00
+      heat_max_pct: 0.05
+    - max_percentile: 80.0
+      risk_multiplier: 0.75
+      heat_max_pct: 0.04
+    - max_percentile: 95.0
+      risk_multiplier: 0.50
+      heat_max_pct: 0.025
+    - max_percentile: 100.0
+      risk_multiplier: 0.00
+      heat_max_pct: 0.00
+
+protections:
+  cooldown_stops_count: 2
+  cooldown_lookback_days: 30
+  cooldown_pause_days: 10
+  setup_monitor_window: 30
+  setup_bootstrap_quantile: 0.05
+  circuit_breaker_dd_level1: 0.08
+  circuit_breaker_dd_level2: 0.12
+  circuit_breaker_level1_risk_multiplier: 0.50
+  shadow_sma_period: 20
+  cusum_k_sigma: 0.5
+  cusum_h_sigma: 5.0
