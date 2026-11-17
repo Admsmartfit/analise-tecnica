@@ -4,7 +4,10 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import pandas as pd
 
 from ts.core.calendar import B3Calendar, get_calendar
 from ts.core.config import Settings, compute_normalized_yaml_hash, load_settings
@@ -40,6 +43,7 @@ def sync_universe(
     db: DatabaseManager | None = None,
     calendar: B3Calendar | None = None,
     settings: Settings | None = None,
+    now: datetime | None = None,
 ) -> SyncReport:
     """Synchronize D1 bars incrementally for universe and IBOV up to asof."""
     settings = settings or load_settings()
@@ -76,6 +80,17 @@ def sync_universe(
     target_tickers = sorted(target_set)
 
     cfg_hash = compute_normalized_yaml_hash(settings.model_dump())
+
+    # PRD 1.1.1: only closed D1 bars. Before the close (+30 min, closing auction and late prints) the bar of
+    # today is still forming — both MT5 and Yahoo return it — so it is neither stored nor required.
+    now_sp = (now or datetime.now(UTC)).astimezone(ZoneInfo("America/Sao_Paulo"))
+    bar_asof = asof
+    if asof >= now_sp.date() and calendar.is_session(now_sp.date()):
+        closes_at = datetime.combine(now_sp.date(), calendar.close_time(now_sp.date()), now_sp.tzinfo)
+        if now_sp < closes_at + timedelta(minutes=30):
+            bar_asof = calendar.previous_session(now_sp.date())
+            logger.info("Session %s not closed yet (%s): syncing closed bars up to %s", now_sp.date(),
+                        now_sp.strftime("%H:%M"), bar_asof)
     db.record_run(run_id, "sync", asof.isoformat(), cfg_hash, "0.1.0")
 
     success: list[str] = []
@@ -110,9 +125,11 @@ def sync_universe(
                             break
                     start_date = curr_d
 
-            # 2. Fetch bars from gateway
+            # 2. Fetch bars from gateway (never store the D1 bar of a session that has not closed yet)
             try:
-                df = gateway.daily_bars(ticker, start_date, asof)
+                df = gateway.daily_bars(ticker, start_date, bar_asof)
+                if df is not None and len(df):
+                    df = df[pd.to_datetime(df["session_date"]).dt.date <= bar_asof].reset_index(drop=True)
             except DataUnavailableError as due:
                 logger.warning(f"Data unavailable for {ticker}: {due}")
                 failed.append((ticker, str(due)))
@@ -125,7 +142,7 @@ def sync_universe(
                 continue
 
             # 3. Validation
-            issues = validator.validate_bars(ticker, df, asof=asof, check_calendar=True)
+            issues = validator.validate_bars(ticker, df, asof=bar_asof, check_calendar=True)
             for iss in issues:
                 db.save_quality_issue(
                     iss.session_date.isoformat(),

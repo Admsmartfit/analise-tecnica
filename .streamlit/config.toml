@@ -1,0 +1,14 @@
+# Configuração do painel (lida porque o atalho inicia o Streamlit na pasta do sistema).
+[client]
+# Esconde o botão "Deploy" e o menu de desenvolvedor do Streamlit (não fazem parte do sistema).
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+
+[theme]
+base = "dark"
+primaryColor = "#26a69a"

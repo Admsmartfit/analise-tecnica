@@ -115,3 +115,29 @@ def test_sync_universe_partial_failure_continues(
     assert "FAIL1" in failed_names
     assert "FAIL2" in failed_names
     assert "FAIL3" in failed_names
+
+
+def test_sync_never_stores_a_forming_bar(tmp_path: Path, sample_daily_df: pd.DataFrame, b3_calendar: B3Calendar) -> None:
+    """Before the close (+30 min) the bar of the session is still forming: not stored, not required."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    settings = Settings()
+    settings.system.data_dir = str(tmp_path / "data")
+    settings.system.db_path = str(tmp_path / "t.db")
+    store = OhlcvStore(data_dir=tmp_path / "d1")
+    clean = sample_daily_df[sample_daily_df["session_date"].apply(b3_calendar.is_session)].copy()
+    today = clean["session_date"].max()
+    fake = FakeMT5()
+    fake.set_bars("PETR4", clean)
+    fake.set_bars("IBOV", clean)
+    gw = MT5Gateway(mt5_module=fake, settings=settings)
+    kw = {"asof": today, "tickers": ["PETR4"], "gateway": gw, "store": store, "calendar": b3_calendar,
+          "settings": settings, "db": DatabaseManager(settings.system.db_path)}
+    sp = ZoneInfo("America/Sao_Paulo")
+    during = sync_universe(now=datetime.combine(today, datetime.min.time(), sp).replace(hour=15), **kw)
+    assert during.status == "OK"
+    assert store.get_latest_session_date("PETR4") == b3_calendar.previous_session(today)
+    after = sync_universe(now=datetime.combine(today, datetime.min.time(), sp).replace(hour=19, minute=30), **kw)
+    assert after.status == "OK"
+    assert store.get_latest_session_date("PETR4") == today
