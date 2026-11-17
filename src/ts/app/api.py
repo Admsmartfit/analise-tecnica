@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import sqlite3
 import subprocess
@@ -160,7 +161,8 @@ def build_status(ctx: TerminalContext, now: datetime | None = None) -> dict[str,
     wd = ctx.query("SELECT status, finished_at, error FROM runs WHERE routine='watchdog' ORDER BY started_at DESC LIMIT 1")
     eq = ctx.query("SELECT session_date, equity, drawdown_pct, heat_pct FROM equity_daily WHERE curve='PAPER' "
                    "ORDER BY session_date DESC LIMIT 1")
-    snap = ctx.query("SELECT state_json FROM book_snapshots ORDER BY session_date DESC LIMIT 1")
+    snap = ctx.query("SELECT session_date, state_json FROM book_snapshots ORDER BY session_date DESC LIMIT 1")
+    last_processed = None if snap.empty else snap["session_date"].iloc[0]
     cb_level, cb_dd = 0, 0.0
     if not snap.empty:
         try:
@@ -187,6 +189,9 @@ def build_status(ctx: TerminalContext, now: datetime | None = None) -> dict[str,
         "next_event": ctx.next_event(now),
         "connection": connection,
         "paper_started": not eq.empty,
+        "last_processed_session": last_processed,
+        # True when a closed session still has to go through the EOD (the "run now" button only makes sense then)
+        "eod_pending": last_processed is None or last_processed < last_closed.isoformat(),
         "equity": None if eq.empty else {k: _clean(v) for k, v in eq.iloc[0].items()},
         "circuit_breaker": {"level": cb_level, "drawdown": cb_dd},
         "reference_capital": s.execution.reference_capital,
@@ -370,6 +375,32 @@ def build_signals(ctx: TerminalContext, day: str | None = None) -> dict[str, Any
     return {"date": day, "items": _records(df)}
 
 
+def build_equity(ctx: TerminalContext) -> dict[str, Any]:
+    df = ctx.query("SELECT session_date, curve, equity, cash, heat_pct, drawdown_pct FROM equity_daily "
+                   "WHERE curve IN ('PAPER', 'SHADOW') ORDER BY session_date")
+    if df.empty:
+        return {"paper": [], "shadow": [], "summary": None}
+    paper = df[df["curve"] == "PAPER"]
+    shadow = df[df["curve"] == "SHADOW"]
+    cap = ctx.settings.execution.reference_capital
+    last = paper.iloc[-1]
+    peak = float(paper["equity"].max())
+    trades = ctx.query("SELECT pnl_brl, r_multiple FROM positions WHERE status='CLOSED' AND is_shadow=0")
+    summary = {
+        "equity": float(last["equity"]), "cash": float(last["cash"]), "return_pct": float(last["equity"]) / cap - 1,
+        "drawdown_pct": float(last["drawdown_pct"]), "max_drawdown_pct": float(paper["drawdown_pct"].max()),
+        "heat_pct": float(last["heat_pct"]), "peak": peak, "sessions": int(len(paper)),
+        "start": paper["session_date"].iloc[0], "last": paper["session_date"].iloc[-1],
+        "trades": int(len(trades)), "win_rate": float((trades["pnl_brl"] > 0).mean()) if len(trades) else None,
+        "expectancy_r": float(trades["r_multiple"].mean()) if len(trades) else None,
+    }
+    return {
+        "paper": [{"time": r.session_date, "value": float(r.equity), "dd": float(r.drawdown_pct)} for r in paper.itertuples()],
+        "shadow": [{"time": r.session_date, "value": float(r.equity)} for r in shadow.itertuples()],
+        "summary": {k: _clean(v) for k, v in summary.items()},
+    }
+
+
 def build_runs(ctx: TerminalContext) -> list[dict[str, Any]]:
     df = ctx.query("SELECT routine, session_date, started_at, finished_at, status, error FROM runs "
                    "ORDER BY started_at DESC LIMIT 100")
@@ -399,8 +430,9 @@ def start_job(ctx: TerminalContext, kind: str) -> Job:
                 job.code, job.message = code, msg
             else:
                 args = ["eod", "--asof", ctx.last_closed_session().isoformat()] if kind == "eod" else ["sync"]
+                env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
                 proc = subprocess.run([sys.executable, "-m", "ts", *args], cwd=ctx.root, capture_output=True, text=True,
-                                      encoding="utf-8", errors="replace", timeout=3600,
+                                      encoding="utf-8", errors="replace", timeout=3600, env=env,
                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 job.code = proc.returncode
                 job.output = (proc.stdout + proc.stderr)[-4000:]
@@ -474,6 +506,10 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
     @app.get("/api/signals")
     def signals(day: str | None = None) -> dict[str, Any]:
         return build_signals(ctx, day)
+
+    @app.get("/api/equity")
+    def equity() -> dict[str, Any]:
+        return build_equity(ctx)
 
     @app.get("/api/runs")
     def runs() -> list[dict[str, Any]]:

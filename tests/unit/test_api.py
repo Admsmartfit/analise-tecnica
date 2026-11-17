@@ -88,3 +88,8 @@ def test_last_closed_session_respects_close(client: TestClient) -> None:
     d = date(2024, 6, 27)  # Thursday, session
     assert ctx.last_closed_session(datetime(2024, 6, 27, 15, 0)) == date(2024, 6, 26)
     assert ctx.last_closed_session(datetime(2024, 6, 27, 20, 0)) == d
+
+
+def test_equity_empty_and_eod_pending_on_fresh_install(client: TestClient) -> None:
+    assert client.get("/api/equity").json() == {"paper": [], "shadow": [], "summary": None}
+    assert client.get("/api/status").json()["eod_pending"] is True

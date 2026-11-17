@@ -126,3 +126,11 @@ dialog .row { display: flex; justify-content: space-between; align-items: center
 .credits a { color: var(--muted); }
 
 @media (max-width: 1366px) { :root { --watch-w: 330px; --inspector-w: 280px; } .layers { display: none; } }
+
+/* ---------------------------------------------------------------- patrimônio */
+.equity-wrap { display: grid; grid-template-columns: 300px 1fr; gap: 12px; padding: 10px; height: 100%; min-height: 0; }
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; }
+.kpi { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.kpi .l { color: var(--muted); font-size: 11px; } .kpi .v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#equity-chart { min-height: 160px; position: relative; }
+#equity-chart .empty { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; }

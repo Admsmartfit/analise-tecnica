@@ -357,11 +357,49 @@ function emptyNoData() {
   return '<h3>Selecione um ativo no Market Watch</h3>';
 }
 
+function eodAction() {
+  const s = state.status; if (!s) return '';
+  if (!s.eod_pending) return `<p class="note">O pregão ${dmy(s.data.last_closed_session)} já foi processado. Próximo EOD: ${s.next_event.at ? dmy(s.next_event.at) + ' ' + s.next_event.at.slice(11, 16) : '—'}.</p>`;
+  return `<div class="actions"><button class="primary" data-act="eod">Rodar o EOD agora (pregão ${dmy(s.data.last_closed_session)})</button></div>`;
+}
+
 function emptyPaper() {
-  const s = state.status; const d = s ? dmy(s.data.last_closed_session) : '';
   return `<div class="empty"><h3>O paper trading ainda não começou</h3>
     <p>A rotina de fim de dia roda sozinha às 19:30 em dias úteis: baixa as cotações, gera os sinais, simula as ordens e preenche estas abas.</p>
-    <div class="actions"><button class="primary" data-act="eod">Rodar o primeiro EOD agora (pregão ${d})</button></div></div>`;
+    ${eodAction()}</div>`;
+}
+
+let eqChart = null;
+function renderEquity(body, data) {
+  const sm = data.summary;
+  if (!sm) { body.innerHTML = emptyPaper(); return; }
+  const k = (l, v, cls = '') => `<div class="kpi"><div class="l">${l}</div><div class="v ${cls}">${v}</div></div>`;
+  body.innerHTML = `<div class="equity-wrap"><div class="kpis">
+      ${k('Patrimônio', brl(sm.equity))}${k('Retorno', pct(sm.return_pct), sm.return_pct >= 0 ? 'up' : 'down')}
+      ${k('Drawdown atual', pct(-sm.drawdown_pct, 1), sm.drawdown_pct > 0 ? 'down' : '')}${k('Drawdown máx.', pct(-sm.max_drawdown_pct, 1))}
+      ${k('Risco aberto (heat)', pct(sm.heat_pct))}${k('Caixa', brl(sm.cash))}
+      ${k('Operações encerradas', sm.trades)}${k('Esperança', sm.expectancy_r == null ? '—' : `${fmt(sm.expectancy_r)} R`)}
+    </div><div id="equity-chart"></div></div>`;
+  const el = $('#equity-chart');
+  if (eqChart) { eqChart.remove(); eqChart = null; }
+  if (data.paper.length < 2) {
+    el.innerHTML = `<div class="empty"><h3>Paper iniciado em ${dmy(sm.start)}</h3>
+      <p>A curva de patrimônio aparece a partir do 2º pregão processado (${sm.sessions} até agora).</p>${eodAction()}</div>`;
+    bindEmptyActions(); return;
+  }
+  const LW = window.LightweightCharts;
+  eqChart = LW.createChart(el, {
+    autoSize: true, layout: { background: { color: css('--panel') }, textColor: css('--muted') },
+    grid: { vertLines: { visible: false }, horzLines: { color: css('--line') + '55' } },
+    localization: { locale: 'pt-BR', dateFormat: 'dd/MM/yyyy', priceFormatter: (p) => nf(0).format(p) },
+  });
+  const a = eqChart.addSeries(LW.AreaSeries, { lineColor: css('--accent'), topColor: css('--accent') + '55', bottomColor: css('--accent') + '05', lineWidth: 2 });
+  a.setData(data.paper.map((p) => ({ time: p.time, value: p.value })));
+  if (data.shadow.length) {
+    const s = eqChart.addSeries(LW.LineSeries, { color: css('--muted'), lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+    s.setData(data.shadow);
+  }
+  eqChart.timeScale().fitContent();
 }
 
 function bindEmptyActions() {
@@ -408,6 +446,8 @@ async function renderTab() {
         { h: 'Resultado', f: (r) => `<span class="sig ${r.disposition === 'ACCEPTED' ? 'accepted' : 'rejected'}">${esc(r.result)}</span>` },
         { h: 'Motivo', f: (r) => esc(r.reason || '') },
       ], rows) : (s && !s.paper_started ? emptyPaper() : '<div class="empty"><h3>Nenhum sinal no último pregão processado</h3><p>Isso é normal: os setups exigem tendência, volume e estrutura de preço ao mesmo tempo.</p></div>');
+    } else if (state.tab === 'equity') {
+      renderEquity(body, await api('/api/equity'));
     } else {
       const rows = await api('/api/runs');
       body.innerHTML = rows.length ? table([

@@ -93,8 +93,9 @@ def _features(ticker: str, mtime: float) -> tuple[pd.DataFrame, list[dict]]:
 
 
 def _run_cli(args: list[str], timeout: int = 1800) -> tuple[int, str]:
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}  # filho escreve UTF-8 (sem "�")
     proc = subprocess.run([sys.executable, "-m", "ts", *args], cwd=ROOT, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout,
+                          encoding="utf-8", errors="replace", timeout=timeout, env=env,
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return proc.returncode, (proc.stdout + proc.stderr)[-4000:]
 
@@ -159,9 +160,20 @@ def _tab_overview() -> None:
     n_open = _query("SELECT COUNT(*) n FROM positions WHERE status IN ('OPEN','PARTIAL') AND is_shadow=0")
     c[4].metric("Posições abertas", int(n_open["n"].iloc[0]) if not n_open.empty else 0)
 
+    if len(eq) < 2:
+        st.info(f"Paper iniciado em {pd.to_datetime(eq['session_date'].iloc[0]):%d/%m/%Y} com "
+                f"R$ {eq['equity'].iloc[0]:,.0f}. A curva de patrimônio aparece a partir do 2º pregão processado."
+                .replace(",", "."))
+        _eod_button()
+        return
+    eq["session_date"] = pd.to_datetime(eq["session_date"])
+    if not sh.empty:
+        sh["session_date"] = pd.to_datetime(sh["session_date"])
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.04)
     fig.add_trace(go.Scatter(x=eq["session_date"], y=eq["equity"], name="Patrimônio (paper)", line={"width": 2}),
                   row=1, col=1)
+    fig.update_yaxes(tickformat=",.0f", row=1, col=1)
+    fig.update_xaxes(tickformat="%d/%m/%Y", rangebreaks=[{"bounds": ["sat", "mon"]}])
     if not sh.empty:
         fig.add_trace(go.Scatter(x=sh["session_date"], y=sh["equity"], name="Curva sombra",
                                  line={"width": 1, "dash": "dot"}), row=1, col=1)
@@ -174,6 +186,10 @@ def _tab_overview() -> None:
 
 def _eod_button() -> None:
     d = _last_closed_session()
+    done = _query("SELECT 1 FROM book_snapshots WHERE session_date >= ? LIMIT 1", (d.isoformat(),))
+    if not done.empty:
+        st.caption(f"O pregão {d:%d/%m/%Y} já foi processado. O próximo EOD roda sozinho às 19:30 do próximo dia útil.")
+        return
     if st.button(f"▶️ Rodar EOD agora (pregão {d:%d/%m/%Y})"):
         with st.spinner("Rodando EOD: sync, sinais, simulação paper..."):
             code, out = _run_cli(["eod", "--asof", d.isoformat()])
