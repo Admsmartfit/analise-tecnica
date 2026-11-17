@@ -35,6 +35,7 @@ from ts.data.mt5_gateway import MT5Gateway
 from ts.data.ohlcv_store import OhlcvStore
 from ts.data.sync import sync_universe
 from ts.data.universe import universe_on
+from ts.data.yahoo_gateway import make_gateway
 from ts.execution.reconcile import reconcile_positions
 from ts.execution.session_engine import BookState, SessionEngine
 from ts.persistence.db import DatabaseManager, backup_database
@@ -242,7 +243,7 @@ def preopen_routine(
             repo = PaperRepository(conn, settings.execution.mode)
 
             if check_terminal:
-                gw = gateway or MT5Gateway(settings=settings)
+                gw = gateway or make_gateway(settings)
                 try:
                     gw.connect()
                     h = gw.health()
@@ -346,9 +347,12 @@ def watchdog_routine(
         with _lock(settings, timeout_s=0):
             run_id = _register_run(db, "watchdog", today, "watchdog")
             problems: list[str] = []
-            if gateway is None and _terminal_process_alive() is False:
+            is_mt5 = settings.data.provider == "mt5"
+            if gateway is None and is_mt5 and _terminal_process_alive() is False:
                 problems.append("terminal64.exe não está rodando")
-            gw = gateway or MT5Gateway(settings=settings)
+            gw = gateway or make_gateway(settings)
+            # Yahoo quotes are ~15 min delayed: a 120 s threshold would alert all day long.
+            max_age = settings.mt5.max_tick_age_seconds if is_mt5 else max(settings.mt5.max_tick_age_seconds, 2400.0)
             try:
                 gw.connect()
                 h = gw.health()
@@ -356,7 +360,7 @@ def watchdog_routine(
                     problems.append(f"terminal não OK: {h.details}")
                 now = now_local or datetime.now()
                 in_session = cal.open_time(today) <= now.time() <= cal.close_time(today)
-                if in_session and (h.tick_age_seconds is None or h.tick_age_seconds > settings.mt5.max_tick_age_seconds):
+                if in_session and (h.tick_age_seconds is None or h.tick_age_seconds > max_age):
                     problems.append(f"tick parado há {h.tick_age_seconds}s em {settings.mt5.heartbeat_symbol} (desconexão silenciosa?)")
             except ConnectivityError as e:
                 problems.append(str(e))

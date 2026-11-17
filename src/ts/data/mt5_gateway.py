@@ -255,6 +255,11 @@ class MT5Gateway:
         version_str = f"{ver[0]}.{ver[1]} ({ver[2]})" if ver else None
         ok = connected and (acc_info is not None)
 
+        # Round-trip to the broker's trade server as measured by the terminal itself (microseconds).
+        # This is the number to compare between brokers — pinging a broker's website measures its CDN.
+        ping_last = getattr(term_info, "ping_last", None) if term_info else None
+        details["server_ping_ms"] = round(ping_last / 1000.0, 1) if ping_last else None
+        details["company"] = getattr(acc_info, "company", None) if acc_info else None
         details["terminal_path"] = self.settings.mt5.terminal_path
         details["server"] = self.settings.mt5.server
         details["login"] = acc_info.login if acc_info else None

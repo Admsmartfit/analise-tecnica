@@ -49,6 +49,17 @@ class LoggingSettings(BaseModel):
     directory: str = "logs"
 
 
+class DataSettings(BaseModel):
+    """Market-data source. ``mt5`` = broker terminal (production); ``yahoo`` = free D1 bars for testing
+    without a broker login. Orders are never sent through Yahoo — it only feeds sync/EOD in paper mode."""
+
+    provider: Literal["mt5", "yahoo"] = "mt5"
+    yahoo_suffix: str = ".SA"
+    yahoo_index_symbol: str = "^BVSP"
+    yahoo_max_workers: int = 4
+    yahoo_timeout_s: float = 20.0
+
+
 class TelegramSettings(BaseModel):
     enabled: bool = False
     chat_id: str = ""
@@ -61,6 +72,14 @@ class Settings(BaseModel):
     mt5: MT5Settings = Field(default_factory=MT5Settings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
+    data: DataSettings = Field(default_factory=DataSettings)
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for k, v in override.items():
+        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
 
 
 class MarketFilterConfig(BaseModel):
@@ -286,8 +305,20 @@ def load_settings(path: str | Path | None = None) -> Settings:
         except Exception as e:
             raise ConfigError(f"Error parsing YAML in {p}: {e}") from e
 
+    # Machine-specific overrides (login, provider, paths) live in settings.local.yaml, which is git-ignored,
+    # so the auto-updater can `git reset` the repository without touching them.
+    local = p.with_name("settings.local.yaml")
+    if local.exists():
+        try:
+            raw = _deep_merge(raw, yaml.safe_load(local.read_text(encoding="utf-8")) or {})
+        except Exception as e:
+            raise ConfigError(f"Error parsing YAML in {local}: {e}") from e
+
     try:
-        return Settings.model_validate(raw)
+        settings = Settings.model_validate(raw)
+        if settings.execution.mode == "live" and settings.data.provider != "mt5":
+            raise ConfigError("Invalid configuration at 'data.provider': live mode requires provider 'mt5'")
+        return settings
     except ValidationError as e:
         # Extract problem key for explicit error reporting
         first_err = e.errors()[0]

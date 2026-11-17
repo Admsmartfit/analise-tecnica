@@ -15,7 +15,6 @@ from rich.table import Table
 from ts.core.config import load_settings
 from ts.core.errors import ConnectivityError
 from ts.core.logging import setup_logging
-from ts.data.mt5_gateway import MT5Gateway
 from ts.data.ohlcv_store import OhlcvStore
 from ts.data.sync import sync_universe
 from ts.data.universe import universe_on
@@ -72,7 +71,9 @@ def doctor_command(args: argparse.Namespace) -> int:
     # 4. MetaTrader 5 Connectivity
     try:
         # If in paper mode or no MT5 terminal available, gateway will inform
-        gateway = MT5Gateway(settings=settings)
+        from ts.data.yahoo_gateway import make_gateway
+
+        gateway = make_gateway(settings)
         try:
             gateway.connect()
             health = gateway.health()
@@ -85,7 +86,7 @@ def doctor_command(args: argparse.Namespace) -> int:
             else:
                 conn_status = "[yellow]WARN[/yellow]"
                 detail_str = f"Terminal reachable but status not fully OK: {health.details}"
-            table.add_row("MetaTrader 5 Terminal", conn_status, detail_str)
+            table.add_row(f"Market data ({settings.data.provider})", conn_status, detail_str)
             gateway.shutdown()
         except ConnectivityError as ce:
             table.add_row(
@@ -185,6 +186,41 @@ def backtest_command(args: argparse.Namespace) -> int:
     (ref_dir / "setup_r.json").write_text(json.dumps({"config_hash": cfg_hash, **by_setup}), encoding="utf-8")
     console.print(rep.summary_markdown)
     console.print(f"Relatório: {path}")
+    return 0
+
+
+def corp_actions_command(args: argparse.Namespace) -> int:
+    """Import cash dividends from Yahoo into config/corporate_actions.csv (merge, no duplicates)."""
+    import pandas as pd
+
+    from ts.data.yahoo_gateway import YahooGateway
+
+    settings = load_settings()
+    path = Path(settings.system.corporate_actions_path)
+    tickers = [t.strip().upper() for t in args.tickers.split(",")] if args.tickers else universe_on(date.today())
+    start = date.fromisoformat(args.start)
+    rows: list[dict[str, object]] = []
+    with YahooGateway(settings) as gw:
+        for t in tickers:
+            try:
+                rows += gw.dividend_actions(t, start, date.today())
+            except Exception as e:  # noqa: BLE001 - keep going with the other tickers
+                console.print(f"[yellow]{t}: {e}[/yellow]")
+    new = pd.DataFrame(rows, columns=["ticker", "ex_date", "action_type", "value", "factor"])
+    old = pd.read_csv(path, comment="#") if path.exists() else new.iloc[0:0]
+    merged = pd.concat([old, new]).drop_duplicates(subset=["ticker", "ex_date", "action_type"], keep="first")
+    merged = merged.sort_values(["ticker", "ex_date"])
+    header = "# Gerado/mesclado por `python -m ts corp-actions`. Yahoo ja entrega precos ajustados por desdobramento:\n" \
+             "# NAO inclua SPLIT/REVERSE_SPLIT aqui quando data.provider = yahoo.\n"
+    path.write_text(header + merged.to_csv(index=False), encoding="utf-8")
+    console.print(f"{len(merged) - len(old)} novos eventos; total {len(merged)} em {path}")
+    return 0
+
+
+def notify_command(args: argparse.Namespace) -> int:
+    from ts.app.notify import send_telegram
+
+    send_telegram(args.message)
     return 0
 
 
@@ -348,8 +384,19 @@ def main() -> None:
     wr_p.add_argument("--asof", type=str, help="Week end (Friday)")
     wr_p.add_argument("--no-telegram", action="store_true")
 
+    ca_p = subparsers.add_parser("corp-actions", help="Import dividends from Yahoo into corporate_actions.csv")
+    ca_p.add_argument("--tickers", type=str)
+    ca_p.add_argument("--start", type=str, default="2019-01-01")
+
+    nt_p = subparsers.add_parser("notify", help="Send a Telegram message (used by the updater)")
+    nt_p.add_argument("message", type=str)
+
     args = parser.parse_args()
 
+    if args.command == "corp-actions":
+        sys.exit(corp_actions_command(args))
+    if args.command == "notify":
+        sys.exit(notify_command(args))
     if args.command == "backtest":
         sys.exit(backtest_command(args))
     if args.command == "deadman":

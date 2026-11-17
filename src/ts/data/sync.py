@@ -85,7 +85,9 @@ def sync_universe(
     # Connect gateway if not already connected
     owns_gateway = False
     if gateway is None:
-        gateway = MT5Gateway(settings=settings)
+        from ts.data.yahoo_gateway import make_gateway
+
+        gateway = make_gateway(settings)
         gateway.connect()
         owns_gateway = True
 
