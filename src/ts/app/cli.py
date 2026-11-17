@@ -81,7 +81,8 @@ def doctor_command(args: argparse.Namespace) -> int:
                 conn_status = "[green]PASS[/green]"
                 detail_str = (
                     f"Terminal: {health.terminal_version} | Connected: {health.connected} | "
-                    f"AlgoTrading: {health.trade_allowed} | tick age {settings.mt5.heartbeat_symbol}: {health.tick_age_seconds}s"
+                    f"AlgoTrading: {health.trade_allowed} | tick age {settings.mt5.heartbeat_symbol}: {health.tick_age_seconds}s | "
+                    f"ping servidor: {health.details.get('server_ping_ms')} ms ({health.details.get('company')})"
                 )
             else:
                 conn_status = "[yellow]WARN[/yellow]"
