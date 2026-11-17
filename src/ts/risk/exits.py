@@ -31,6 +31,7 @@ class ExitParams:
     stagnation_mfe_r: float = 1.0
     lot: int = 100
     breakeven_cost_pct: float = 0.001
+    breakeven_after_r: float | None = None  # trend trades: floor the stop at entry + costs once MFE >= this
 
 
 def exit_params_for(setup: str, cfg: StrategyConfig, breakeven_cost_pct: float = 0.001, fractional: bool = False) -> ExitParams:
@@ -38,7 +39,8 @@ def exit_params_for(setup: str, cfg: StrategyConfig, breakeven_cost_pct: float =
     s = cfg.setups
     if setup == "A":
         return ExitParams(trailing="CHANDELIER", chandelier_k=s.A.trailing_chandelier_k,
-                          stagnation_bars=s.A.stagnation_bars, stagnation_mfe_r=s.A.stagnation_mfe_r, lot=lot)
+                          stagnation_bars=s.A.stagnation_bars, stagnation_mfe_r=s.A.stagnation_mfe_r, lot=lot,
+                          breakeven_after_r=s.A.breakeven_after_r or None, breakeven_cost_pct=breakeven_cost_pct)
     if setup == "C":
         # Donchian exit (10-day low) is the setup's own trailing and is always active.
         return ExitParams(trailing="DONCHIAN", trailing_activation_r=0.0,
@@ -150,6 +152,11 @@ def evaluate_position_exit(
     if pos.trade_class == TradeClass.TREND:
         if params.stagnation_bars is not None and pos.bars_held >= params.stagnation_bars and mfe_r < params.stagnation_mfe_r:
             return ExitDecision(True, ExitReason.STAGNATION, pos.qty_open, close_p, at_next_open=True)
+        if params.breakeven_after_r is not None and mfe_r >= params.breakeven_after_r:
+            # H1: a trade that reached +X R may not turn into a loss (stop >= entry + round-trip costs)
+            be = round(pos.entry_price * (1.0 + be_cost), 2)
+            if be > pos.current_stop:
+                pos.current_stop = be
         if mfe_r >= params.trailing_activation_r:
             if params.trailing == "DONCHIAN" and donchian10_lower is not None and donchian10_lower == donchian10_lower:
                 cand = round(donchian10_lower, 2)

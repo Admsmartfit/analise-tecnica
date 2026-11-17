@@ -195,7 +195,7 @@ def evaluate_setup_c(
     if not cc.enabled or fv.n_bars < cc.donchian_entry_period + 10:
         return None
     up, c_t = fv.v("donch_entry_up"), fv.v("close")
-    if _nan(up) or c_t <= up:
+    if _nan(up) or c_t <= up * (1.0 + cc.breakout_min_pct):  # H2: penetration filter (0 = classic Donchian)
         return None
     ad, rv = fv.v("adx"), fv.v("rvol")
     if _nan(ad) or ad < cc.adx_threshold or _nan(rv) or rv < cc.rvol_min:

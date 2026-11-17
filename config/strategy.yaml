@@ -46,7 +46,7 @@ setups:
   C:
     name: "Donchian_20_10"
     trade_class: "TREND"
-    enabled: true
+    enabled: false   # lab 2026-11-17: E[R] -0,24..-0,37 com dividendos; desligar cortou o DD de 16,9% p/ 11,9%
     donchian_entry_period: 20
     donchian_exit_period: 10
     adx_threshold: 20.0
@@ -58,7 +58,7 @@ setups:
   D:
     name: "Bollinger_Squeeze"
     trade_class: "TREND"
-    enabled: true
+    enabled: false   # lab 2026-11-17: acerto 13-22%, E[R] -0,42..-0,62; 35% estopado em <= 3 pregões
     bollinger_period: 20
     bollinger_std: 2.0
     bollinger_ddof: 0
@@ -142,10 +142,11 @@ protections:
   cusum_k_sigma: 0.5
   cusum_h_sigma: 5.0
 
-# Roteador de regime (Tratado: Diamante, eficiência de Kaufman, amplitude). HIPÓTESE EM VALIDAÇÃO:
-# fica desligado até o relatório `python -m ts backtest --regimes` mostrar ganho fora da amostra.
+# Roteador de regime (Tratado: Diamante, eficiência de Kaufman, amplitude).
+# Ligado em 2026-11-17 junto com C/D desligados: no lab (A+B) E[R] -0,020 -> +0,005 e DD 8,4%.
+# Ainda NÃO passa no G0 (IC inclui zero, DSR 0,14) — decisão de proteção de capital, não de edge.
 regime_router:
-  enabled: false
+  enabled: true
   er_period: 10
   er_trend_min: 0.30
   breadth_min_pct_above_sma50: 0.0

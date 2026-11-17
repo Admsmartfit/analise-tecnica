@@ -105,6 +105,8 @@ class SetupAConfig(BaseModel):
     chandelier_atr_period: int = 22
     stagnation_bars: int = 15
     stagnation_mfe_r: float = 1.0
+    # Hipótese H1: após o lucro máximo atingir X R, o stop nunca fica abaixo de entrada + custos. 0 = desligado.
+    breakeven_after_r: float = 0.0
 
 
 class SetupBConfig(BaseModel):
@@ -138,6 +140,8 @@ class SetupCConfig(BaseModel):
     entry_type: Literal["OPEN_AUCTION"] = "OPEN_AUCTION"
     stagnation_bars: int = 15
     stagnation_mfe_r: float = 1.0
+    # Hipótese H2 (Tratado 2.4): fechamento precisa superar a máxima de N dias em pelo menos X. 0 = desligado.
+    breakout_min_pct: float = 0.0
 
 
 class SetupDConfig(BaseModel):
