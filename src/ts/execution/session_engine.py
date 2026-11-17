@@ -33,6 +33,7 @@ from ts.risk.portfolio import PortfolioRiskManager, compute_betas
 from ts.risk.protections import AssetCooldownTracker, CircuitBreaker, SetupStatisticalMonitor
 from ts.risk.sizing import SizingResult, calculate_position_size
 from ts.strategy.regime import regime_tier
+from ts.strategy.router import compute_breadth, context_for, route
 from ts.strategy.setups import ceil_tick, floor_tick
 from ts.strategy.signal_engine import SignalEngine, TickerData
 
@@ -284,6 +285,7 @@ class SessionEngine:
         # break-even for the remainder after the partial = entry + round-trip costs (PRD 1.2.2)
         self.breakeven_cost_pct = 2.0 * (self.costs.b3_emoluments_pct + self.costs.slippage_pct)
         self._params: dict[str, ExitParams] = {}
+        self._breadth_cache: tuple[tuple[int, int], pd.DataFrame] | None = None
 
     # ------------------------------------------------------------------ helpers
     def exit_params(self, setup: str) -> ExitParams:
@@ -605,9 +607,21 @@ class SessionEngine:
         pending_tickers = {o.ticker for o in state.pending if not o.is_shadow}
 
         sized: list[tuple[Signal, SizingResult]] = []
+        breadth = self._breadth(prepared)
+        router_cfg = self.cfg.regime_router
         for sig in signals:
             rec = SignalRecord(sig, "")
             res.signals.append(rec)
+            td = prepared[sig.ticker]
+            k = td.index_of(d)
+            ctx = context_for(td, k, d, breadth) if k is not None else None
+            if ctx is not None:
+                sig.features.update(ctx.as_features())  # regime tag on every signal (router on or off)
+            if router_cfg.enabled and ctx is not None and not halted:
+                why = route(sig, ctx, router_cfg)
+                if why:
+                    rec.disposition, rec.reason = "REJECTED_REGIME", why
+                    continue
             if halted:
                 self._shadow_order(state, sig, d, nd, equity, rec)
                 continue
@@ -653,6 +667,13 @@ class SessionEngine:
             rec.disposition, rec.reason = dec.disposition, dec.reason
             if dec.disposition == "ACCEPTED":
                 rec.client_order_id = self._queue_entry(state, dec.signal, dec.sizing, d, nd, False, res)
+
+    def _breadth(self, prepared: Mapping[str, TickerData]) -> pd.DataFrame:
+        """Universe breadth, computed once per prepared set (whole history; causal per row)."""
+        key = (id(prepared), len(prepared))
+        if self._breadth_cache is None or self._breadth_cache[0] != key:
+            self._breadth_cache = (key, compute_breadth(prepared))
+        return self._breadth_cache[1]
 
     def _shadow_order(self, state: BookState, sig: Signal, d: date, nd: date, equity: float, rec: SignalRecord) -> None:
         rec.disposition, rec.reason = "SHADOW", "circuit breaker level 2: tracked in shadow book"

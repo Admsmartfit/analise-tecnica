@@ -241,6 +241,39 @@ class ProtectionsConfig(BaseModel):
     cusum_h_sigma: float = 5.0
 
 
+class RouterSetupRule(BaseModel):
+    """Where a setup may trade: allowed Diamond phases and whether it needs a trending tape (ER)."""
+
+    phases: list[int] = Field(default_factory=lambda: [2, 3])
+    trend_only: bool = False
+
+
+def _default_router_rules() -> dict[str, RouterSetupRule]:
+    # Defaults from the reference books (Tratado, seções 1.3, 1.4, 2.1, 2.2, 4.1):
+    #  A pivô de alta / C Donchian: tendência em construção ou plena, com fita direcional (ER alto).
+    #  B pullback: só na fase 3 ("compras plenas e pullbacks").
+    #  D squeeze: nasce de volatilidade baixa — ER baixo é esperado, não exige tendência.
+    #  E divergência: reversão dentro de tendência primária (fases 3 e 4).
+    #  Fase 4 (Aviso: perda de momentum) bloqueia entradas de tendência.
+    return {
+        "A": RouterSetupRule(phases=[2, 3], trend_only=True),
+        "B": RouterSetupRule(phases=[3], trend_only=False),
+        "C": RouterSetupRule(phases=[2, 3], trend_only=True),
+        "D": RouterSetupRule(phases=[2, 3], trend_only=False),
+        "E": RouterSetupRule(phases=[3, 4], trend_only=False),
+    }
+
+
+class RegimeRouterConfig(BaseModel):
+    """Regime router (hypothesis under validation): disabled by default; enable only after the regime report."""
+
+    enabled: bool = False
+    er_period: int = 10
+    er_trend_min: float = 0.30  # Kaufman ER at or above this = trending tape
+    breadth_min_pct_above_sma50: float = 0.0  # share of the universe above its SMA50 (0 disables)
+    rules: dict[str, RouterSetupRule] = Field(default_factory=_default_router_rules)
+
+
 class StrategyConfig(BaseModel):
     # Ativos com menos barras que isso ficam fora do universo (aquecimento de EMA/RMA, PRD 1.1.5).
     min_history_bars: int = 260
@@ -252,6 +285,7 @@ class StrategyConfig(BaseModel):
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
     regime: RegimeConfig = Field(default_factory=RegimeConfig)
     protections: ProtectionsConfig = Field(default_factory=ProtectionsConfig)
+    regime_router: RegimeRouterConfig = Field(default_factory=RegimeRouterConfig)
 
 
 class TaxConfig(BaseModel):

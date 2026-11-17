@@ -18,7 +18,9 @@ from ts.indicators.ta import (
     adx,
     atr,
     bollinger_bands,
+    diamond_phase,
     donchian,
+    efficiency_ratio,
     ema,
     gap_quantile,
     macd,
@@ -63,6 +65,10 @@ def compute_features(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
     rs_n = cfg.portfolio.relative_strength_days
     f["roc_rs"] = c / c.shift(rs_n) - 1.0
     f["ret1"] = c.pct_change()
+    # Regime context (PRD regime router): Diamond phase on fixed 50/200 SMAs and Kaufman efficiency ratio.
+    f["sma50"], f["sma200"] = sma(c, 50), sma(c, 200)
+    f["phase"] = diamond_phase(c, f["sma50"], f["sma200"])
+    f["er"] = efficiency_ratio(c, cfg.regime_router.er_period)
     return f
 
 

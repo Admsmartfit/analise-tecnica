@@ -138,6 +138,10 @@ async function loadStatus() {
   const n = s.next_event;
   $('#st-next').innerHTML = n.at ? `Próximo: <b>${n.label} ${dmy(n.at)} ${n.at.slice(11, 16)}</b>` : '';
   $('#st-conn').innerHTML = `Fonte: <b>${esc(s.connection.label)}</b>`; $('#st-conn').title = s.connection.detail || '';
+  const br = s.breadth;
+  $('#st-breadth').innerHTML = br && br.pct_above_sma50 != null
+    ? `Amplitude: <b>${nf(0).format(br.pct_above_sma50 * 100)}% acima da MM50</b> · Roteador: <b>${br.router_enabled ? 'ligado' : 'desligado'}</b>` : '';
+  $('#st-breadth').title = 'Parcela das ações do universo fechando acima da média de 50 dias (força interna do mercado).';
   const v = s.version || {};
   $('#st-update').classList.toggle('hidden', !v.update_available);
   renderBanner(s);
@@ -225,6 +229,11 @@ async function runAction(kind, label) {
 }
 
 // ======================================================================== market watch
+const PHASE_HINT = {
+  1: 'Recuperação: preço acima da MM50, abaixo da MM200 — possível fundo', 2: 'Acumulação: acima das duas médias, MM50 ainda abaixo da MM200',
+  3: 'Altista: tendência de alta plena — compras e pullbacks', 4: 'Aviso: perdeu a MM50 com MM50 > MM200 — perda de momentum',
+  5: 'Distribuição: abaixo das duas médias, MM50 ainda acima da MM200', 6: 'Baixista: tendência de baixa plena — ficar fora',
+};
 function passFilters(r) {
   const q = $('#watch-filter').value.trim().toUpperCase();
   if (q && !r.ticker.includes(q)) return false;
@@ -246,7 +255,7 @@ function renderWatch() {
     return (x > y ? 1 : -1) * dir;
   });
   $('#watch-table tbody').innerHTML = rows.map((r) => {
-    if (!r.has_data) return `<tr data-t="${r.ticker}" class="stale"><td></td><td>${r.ticker}</td><td colspan="5" class="muted">sem cotações</td></tr>`;
+    if (!r.has_data) return `<tr data-t="${r.ticker}" class="stale"><td></td><td>${r.ticker}</td><td colspan="6" class="muted">sem cotações</td></tr>`;
     const chg = r.change_pct === null ? '—' : `<span class="${r.change_pct >= 0 ? 'up' : 'down'}">${pct(r.change_pct)}</span>`;
     const trend = r.trend ? `<span class="trend ${r.trend}" title="${r.trend === 'up' ? 'Fechamento acima da média de 200 dias' : 'Abaixo da média de 200 dias'}">${r.trend === 'up' ? 'Alta' : 'Baixa'}</span>` : '—';
     const sig = r.signal ? `<span class="sig ${r.signal}" title="${esc(r.signals.map((s) => `${s.setup_name}: ${s.result}${s.reason ? ' — ' + s.reason : ''}`).join('\n'))}">${r.signal === 'accepted' ? 'aceito' : 'recusado'}</span>` : '';
@@ -254,7 +263,8 @@ function renderWatch() {
       <td>${r.is_index ? '' : `<span class="star ${state.favs.has(r.ticker) ? 'on' : ''}" data-fav="${r.ticker}" role="button" aria-label="Favorito">★</span>`}</td>
       <td>${r.ticker}${r.held ? '<span class="held-ico" title="Em carteira">💼</span>' : ''}</td>
       <td class="num">${fmt(r.last, r.is_index ? 0 : 2)}</td><td class="num">${chg}</td>
-      <td>${trend}</td><td class="num">${r.atr_pct === null ? '—' : nf(1).format(r.atr_pct * 100)}</td><td>${sig}</td></tr>`;
+      <td>${trend}</td><td title="${esc(PHASE_HINT[r.phase] || '')}">${r.phase ? `${r.phase} ${esc(r.phase_name)}` : '—'}</td>
+      <td class="num">${r.atr_pct === null ? '—' : nf(1).format(r.atr_pct * 100)}</td><td>${sig}</td></tr>`;
   }).join('');
 }
 
@@ -393,6 +403,8 @@ function renderInspector() {
       <dt>Variação</dt><dd class="${(w.change_pct ?? 0) >= 0 ? 'up' : 'down'}">${pct(w.change_pct)}</dd>
       <dt>Tendência primária</dt><dd>${w.trend === 'up' ? 'Alta (acima da SMA 200)' : w.trend === 'down' ? 'Baixa (abaixo da SMA 200)' : '—'}</dd>
       <dt>ATR 14</dt><dd>${w.atr_pct == null ? '—' : nf(2).format(w.atr_pct * 100) + '% do preço'}</dd>
+      <dt>Fase (Diamante)</dt><dd title="${esc(PHASE_HINT[w.phase] || '')}">${w.phase ? `${w.phase} · ${esc(w.phase_name)}` : '—'}</dd>
+      <dt>Eficiência (Kaufman)</dt><dd>${w.er == null ? '—' : `${nf(2).format(w.er)} · ${w.er >= 0.3 ? 'tendência' : 'lateral'}`}</dd>
       <dt>Última barra</dt><dd>${dmy(w.last_date)}</dd></dl></div>
     <div class="card"><h4>Decisões no último pregão processado</h4>
       ${sigs || `<p class="note">${state.status?.paper_started ? 'Nenhum setup disparou para este ativo.' : 'O paper ainda não rodou nenhum EOD.'}</p>`}</div>

@@ -143,6 +143,51 @@ def rvol(volume: pd.Series, period: int = 20) -> pd.Series:
     return volume / baseline.replace(0, np.nan)
 
 
+def efficiency_ratio(close: pd.Series, period: int = 10) -> pd.Series:
+    """Kaufman Efficiency Ratio: |C_t - C_{t-n}| / sum(|ΔC|) over n bars. 1 = straight line, ~0 = choppy."""
+    net = (close - close.shift(period)).abs()
+    path = close.diff().abs().rolling(window=period, min_periods=period).sum()
+    return (net / path.replace(0, np.nan)).clip(0.0, 1.0)
+
+
+def kama(close: pd.Series, er_period: int = 10, fast: int = 2, slow: int = 30) -> pd.Series:
+    """Kaufman Adaptive Moving Average (seeded with the close where ER first exists)."""
+    er = efficiency_ratio(close, er_period).to_numpy()
+    c = close.to_numpy(dtype=float)
+    fsc, ssc = 2.0 / (fast + 1), 2.0 / (slow + 1)
+    out = np.full(len(c), np.nan)
+    prev = np.nan
+    for i in range(len(c)):
+        if np.isnan(er[i]):
+            continue
+        if np.isnan(prev):
+            prev = c[i]
+        else:
+            sc = (er[i] * (fsc - ssc) + ssc) ** 2
+            prev = prev + sc * (c[i] - prev)
+        out[i] = prev
+    return pd.Series(out, index=close.index)
+
+
+def diamond_phase(close: pd.Series, sma50: pd.Series, sma200: pd.Series) -> pd.Series:
+    """Método do Diamante (Lemos): 6 cyclic phases from close, SMA50 and SMA200 (NaN while warming up).
+
+    1 Recuperação (C>S50, C<S200, S50<S200)   2 Acumulação (C>S50, C>S200, S50<S200)
+    3 Altista     (C>S50, C>S200, S50>S200)   4 Aviso      (C<S50, C>S200, S50>S200)
+    5 Distribuição(C<S50, C<S200, S50>S200)   6 Baixista   (C<S50, C<S200, S50<S200)
+    (The two remaining sign combinations are impossible: S50<S200<C implies C>S50, etc.)
+    """
+    above50, above200, golden = close > sma50, close > sma200, sma50 > sma200
+    phase = np.select(
+        [above50 & ~above200 & ~golden, above50 & above200 & ~golden, above50 & above200 & golden,
+         ~above50 & above200 & golden, ~above50 & ~above200 & golden, ~above50 & ~above200 & ~golden],
+        [1, 2, 3, 4, 5, 6], default=0,
+    ).astype(float)
+    out = pd.Series(phase, index=close.index)
+    out[sma200.isna() | sma50.isna() | (out == 0)] = np.nan
+    return out
+
+
 def gap_quantile(open_: pd.Series, close: pd.Series, q: float = 0.01, lookback: int = 500,
                  min_periods: int = 120) -> pd.Series:
     """Rolling q-quantile of the opening gap (open[t]/close[t-1]-1), causal. Used for the gap cap (1.2.1)."""

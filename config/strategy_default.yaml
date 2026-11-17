@@ -39,6 +39,8 @@ limits:
   setups.D.trailing_chandelier_k: {min: 2.0, max: 4.0}
   setups.E.min_rr_filter: {min: 2.0, max: 3.0}
   setups.E.final_target_r: {min: 2.0, max: 3.0}
+  regime_router.er_trend_min: {min: 0.15, max: 0.50}
+  regime_router.breadth_min_pct_above_sma50: {min: 0.0, max: 0.60}
 
 # Nunca alterados pela reotimização (prefixos de caminho). Só o trader muda, no strategy.yaml, via git.
 frozen:

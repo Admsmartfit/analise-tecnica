@@ -167,6 +167,16 @@ def backtest_command(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     capital = settings.execution.reference_capital
 
+    if getattr(args, "regimes", False):
+        from ts.backtest.regime_report import regime_report
+
+        text, _ = regime_report(bars, ibov, cfg, costs, capital, universe_fn)
+        path = out_dir / f"regimes_{date.today().isoformat()}_{cfg_hash}.md"
+        path.write_text(text, encoding="utf-8")
+        console.print(text)
+        console.print(f"Relatório: {path}")
+        return 0
+
     if args.g0:
         wf = WalkForwardEngine(cfg, costs, capital)
         rep = wf.run_full_g0(bars, ibov, universe_fn=universe_fn)
@@ -470,6 +480,7 @@ def main() -> None:
     bt_p.add_argument("--end", type=str)
     bt_p.add_argument("--g0", action="store_true", help="Walk-forward + PBO + DSR + plateau + regimes")
     bt_p.add_argument("--no-universe", action="store_true", help="Ignore historical IBX-100 composition")
+    bt_p.add_argument("--regimes", action="store_true", help="Laboratório: o roteador de regime ajuda fora da amostra?")
 
     dm_p = subparsers.add_parser("deadman", help="20:30 dead-man switch: alert if EOD did not finish")
     dm_p.add_argument("--asof", type=str)

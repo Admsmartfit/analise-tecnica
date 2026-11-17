@@ -33,7 +33,8 @@ from fastapi.staticfiles import StaticFiles
 from ts.core.calendar import B3Calendar
 from ts.core.config import Settings, load_settings
 from ts.data.ohlcv_store import OhlcvStore
-from ts.indicators.ta import atr, ema, sma
+from ts.indicators.ta import atr, diamond_phase, efficiency_ratio, ema, sma
+from ts.strategy.router import PHASE_NAMES
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
@@ -200,6 +201,7 @@ def build_status(ctx: TerminalContext, now: datetime | None = None) -> dict[str,
         "quarantine": quarantine,
         "candidate": _latest_candidate(ctx),
         "override": _override_status(ctx),
+        "breadth": _breadth_status(ctx),
         "reference_capital": s.execution.reference_capital,
         "version": _version_info(ctx),
         "server_time": (now or datetime.now()).isoformat(timespec="seconds"),
@@ -215,6 +217,23 @@ def _latest_candidate(ctx: TerminalContext) -> dict[str, Any] | None:
     return {"id": r["candidate_id"], "status": r["status"], "created_at": r["created_at"], "reason": r["trigger_reason"],
             "regime": r["market_regime"], "params": json.loads(r["params_json"] or "{}"),
             "summary": json.loads(r["summary_json"] or "{}")}
+
+
+def _breadth_status(ctx: TerminalContext) -> dict[str, Any] | None:
+    """Share of the universe above its SMA50 (from the Market Watch cache) + router on/off."""
+    with ctx._lock:
+        hit = ctx._cache.get("watchlist")
+    if not hit:
+        return None
+    flags = [r["above_sma50"] for r in hit[1] if not r.get("is_index") and r.get("above_sma50") is not None]
+    enabled = False
+    try:
+        from ts.core.config import load_strategy_config
+
+        enabled = load_strategy_config(ctx.root / "config" / "strategy.yaml")[0].regime_router.enabled
+    except Exception:  # noqa: BLE001
+        pass
+    return {"pct_above_sma50": (sum(flags) / len(flags)) if flags else None, "n": len(flags), "router_enabled": enabled}
 
 
 def _override_status(ctx: TerminalContext) -> dict[str, Any]:
@@ -295,7 +314,11 @@ def build_watchlist(ctx: TerminalContext) -> list[dict[str, Any]]:
             c, h, lo = df["close"].astype(float), df["high"].astype(float), df["low"].astype(float)
             last, prev = float(c.iloc[-1]), float(c.iloc[-2]) if len(c) > 1 else float("nan")
             s200 = float(sma(c, 200).iloc[-1]) if len(c) >= 200 else float("nan")
+            s50 = float(sma(c, 50).iloc[-1]) if len(c) >= 50 else float("nan")
             a14 = float(atr(h, lo, c, 14).iloc[-1])
+            phase = float(diamond_phase(pd.Series([last]), pd.Series([s50]), pd.Series([s200])).iloc[0]) \
+                if s200 == s200 and s50 == s50 else float("nan")
+            er = float(efficiency_ratio(c, 10).iloc[-1])
             tsig = sig[sig["ticker"] == t] if not sig.empty else sig
             accepted = (not tsig.empty) and (tsig["disposition"] == "ACCEPTED").any()
             rows.append({
@@ -303,6 +326,10 @@ def build_watchlist(ctx: TerminalContext) -> list[dict[str, Any]]:
                 "last": last, "change_pct": (last / prev - 1) if prev == prev and prev else None,
                 "trend": None if s200 != s200 else ("up" if last > s200 else "down"),
                 "atr_pct": a14 / last if last else None,
+                "above_sma50": None if s50 != s50 else bool(last > s50),
+                "phase": None if phase != phase else int(phase),
+                "phase_name": None if phase != phase else PHASE_NAMES.get(int(phase)),
+                "er": None if er != er else er,
                 "last_date": df["session_date"].iloc[-1].isoformat(),
                 "stale": df["session_date"].iloc[-1] < last_session,
                 "signal": None if tsig.empty else ("accepted" if accepted else "rejected"),

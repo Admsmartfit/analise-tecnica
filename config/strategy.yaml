@@ -141,3 +141,17 @@ protections:
   quarantine_consecutive_losses: 6   # quarentena por sequência de perdas (0 desliga)
   cusum_k_sigma: 0.5
   cusum_h_sigma: 5.0
+
+# Roteador de regime (Tratado: Diamante, eficiência de Kaufman, amplitude). HIPÓTESE EM VALIDAÇÃO:
+# fica desligado até o relatório `python -m ts backtest --regimes` mostrar ganho fora da amostra.
+regime_router:
+  enabled: false
+  er_period: 10
+  er_trend_min: 0.30
+  breadth_min_pct_above_sma50: 0.0
+  rules:
+    A: {phases: [2, 3], trend_only: true}
+    B: {phases: [3], trend_only: false}
+    C: {phases: [2, 3], trend_only: true}
+    D: {phases: [2, 3], trend_only: false}
+    E: {phases: [3, 4], trend_only: false}
