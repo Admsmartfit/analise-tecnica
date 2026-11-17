@@ -34,7 +34,17 @@ $ErrorActionPreference = "Stop"
 $PythonVersion = "3.12.10"
 $GitInstaller = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
 
+if ([Console]::IsOutputRedirected) { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false }  # GUI do Setup.exe
+
 function Step($m) { Write-Host "`n==> $m" -ForegroundColor Cyan }
+function Get-Secret([string]$envName, [string]$prompt) {
+    # O Setup.exe passa segredos por variável de ambiente do processo filho (nunca na linha de comando).
+    $v = [Environment]::GetEnvironmentVariable($envName, "Process")
+    if ($v) { [Environment]::SetEnvironmentVariable($envName, $null, "Process"); return $v }
+    if ([Console]::IsInputRedirected) { return $null }
+    $sec = Read-Host $prompt -AsSecureString
+    return [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+}
 function Run([string]$exe, [string[]]$argv) {
     & $exe @argv
     if ($LASTEXITCODE -ne 0) { throw "Falhou ($LASTEXITCODE): $exe $($argv -join ' ')" }
@@ -136,14 +146,18 @@ mt5:
 }
 
 if ($Mt5Login -gt 0) {
-    $sec = Read-Host "Senha do MT5 para a conta $Mt5Login (vai para o Gerenciador de Credenciais do Windows)" -AsSecureString
-    $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
-    $plain | & $vpy -c "import sys,keyring; keyring.set_password('ts-mt5', '$Mt5Login', sys.stdin.read().strip())"
+    $plain = Get-Secret "TS_MT5_PASSWORD" "Senha do MT5 para a conta $Mt5Login (vai para o Gerenciador de Credenciais do Windows)"
+    if ($plain) {
+        $plain | & $vpy -c "import sys,keyring; keyring.set_password('ts-mt5', '$Mt5Login', sys.stdin.read().strip())"
+        Write-Host "Senha do MT5 guardada no Gerenciador de Credenciais (ts-mt5 / $Mt5Login)."
+    } else { Write-Warning "Senha do MT5 não informada: guarde depois com keyring (ver README)." }
 }
 if ($TelegramChatId) {
-    $tok = Read-Host "Token do bot do Telegram (vai para o Gerenciador de Credenciais)" -AsSecureString
-    $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($tok))
-    $plain | & $vpy -c "import sys,keyring; keyring.set_password('ts-telegram','bot_token',sys.stdin.read().strip()); keyring.set_password('ts-telegram','chat_id','$TelegramChatId')"
+    $plain = Get-Secret "TS_TELEGRAM_TOKEN" "Token do bot do Telegram (vai para o Gerenciador de Credenciais)"
+    if ($plain) {
+        $plain | & $vpy -c "import sys,keyring; keyring.set_password('ts-telegram','bot_token',sys.stdin.read().strip()); keyring.set_password('ts-telegram','chat_id','$TelegramChatId')"
+        Write-Host "Token do Telegram guardado no Gerenciador de Credenciais."
+    } else { Write-Warning "Token do Telegram não informado." }
 }
 
 # ---------------------------------------------------------------- 6. Testes e diagnóstico

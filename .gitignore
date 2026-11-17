@@ -38,6 +38,10 @@ config/secrets.yaml
 # Machine-specific overrides (login MT5, provider, Telegram chat) - the auto-updater never touches them
 config/settings.local.yaml
 
+# Installer build output (o CI gera o Setup.exe a cada push)
+dist/
+deploy/installer/obj/
+
 # Runtime artifacts
 data/reference/
 data/ts.lock

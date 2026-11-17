@@ -5,7 +5,12 @@ execução no leilão de abertura, mesmo código em backtest, paper e real.
 
 ## Instalação no Windows
 
-Pré-requisito: o código num repositório GitHub (pode ser privado). Na máquina que vai rodar o sistema:
+**Instalador gráfico:** execute `TradingSystemB3-Setup.exe` (baixe em GitHub > Actions > Artifacts, ou gere
+localmente com `powershell -ExecutionPolicy Bypass -File deploy\installer\build_installer.ps1`). Informe a URL do
+repositório, escolha a fonte de dados e clique em **Instalar / Atualizar**. Não precisa de administrador. O EXE não
+é assinado digitalmente: na primeira execução o SmartScreen pode avisar ("Mais informações" > "Executar assim mesmo").
+
+Pré-requisito: o código num repositório GitHub (pode ser privado). Alternativa por linha de comando:
 
 ```powershell
 # opção 1: duplo clique em deploy\install.cmd (pede a URL do repositório)

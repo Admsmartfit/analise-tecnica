@@ -1,0 +1,46 @@
+# A cada push: roda os testes (sem MT5) e gera o instalador TradingSystemB3-Setup.exe como artefato.
+# Baixe em: GitHub > Actions > (execução) > Artifacts. Em tags v*, o EXE também é anexado a um Release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test-and-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: python -m ruff check src tests
+
+      - name: Tests (sem MT5)
+        run: python -m pytest -q -p no:cacheprovider
+
+      - name: Build Setup.exe
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File deploy\installer\build_installer.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TradingSystemB3-Setup
+          path: dist/TradingSystemB3-Setup.exe
+
+      - name: Release (tags v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/TradingSystemB3-Setup.exe
