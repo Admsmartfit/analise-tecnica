@@ -49,6 +49,9 @@ SETUP_PT = {"A": "Pivô de alta", "B": "Pullback", "C": "Donchian 20/10", "D": "
 STATE_PT = {"PLANNED": "Planejada", "SUBMITTED": "Enviada", "ACCEPTED": "Aceita", "PARTIALLY_FILLED": "Parcial",
             "FILLED": "Executada", "CANCELLED": "Cancelada", "EXPIRED": "Expirada", "REJECTED": "Rejeitada",
             "UNKNOWN": "Desconhecida"}
+EXIT_PT = {"STOP": "no stop", "TARGET": "no alvo", "TRAILING": "no stop móvel", "TIME": "por tempo",
+           "STAGNATION": "por estagnação", "BREAKEVEN": "no zero a zero", "MANUAL": "manual",
+           "CIRCUIT_BREAKER": "pelo circuit breaker"}
 KIND_PT = {"OPEN_AUCTION": "Leilão de abertura", "BUY_STOP": "Stop de compra", "EXIT_OPEN": "Saída na abertura"}
 ROUTINE_PT = {"eod": "Fim do dia (EOD)", "preopen": "Pré-abertura", "watchdog": "Watchdog", "sync": "Cotações",
               "backup": "Backup", "deadman": "Dead-man", "backtest": "Backtest", "weekly": "Relatório semanal"}
@@ -377,6 +380,20 @@ def build_chart(ctx: TerminalContext, ticker: str, period: str = "1A") -> dict[s
               for t, x, o, cl in zip(ts, v["real_volume"], v["open"], v["close"], strict=True)]
     sig = ctx.query("SELECT decision_date, setup, disposition, reason, entry_ref FROM signals WHERE ticker=? "
                     "AND decision_date >= ? ORDER BY decision_date", (ticker, ts[0] if ts else "9999"))
+    pos = ctx.query("SELECT opened_on, closed_on, status, entry_price, current_stop, target_price, exit_reason, "
+                    "r_multiple, setup FROM positions WHERE ticker=? AND is_shadow=0 AND opened_on >= ? ORDER BY opened_on",
+                    (ticker, ts[0] if ts else "9999"))
+    trades, position = [], None
+    for r in pos.itertuples() if not pos.empty else []:
+        trades.append({"time": r.opened_on[:10], "kind": "entry", "text": f"Compra ({SETUP_PT.get(r.setup, r.setup)})"})
+        if r.closed_on:
+            rm = _clean(r.r_multiple)
+            trades.append({"time": r.closed_on[:10], "kind": "exit", "win": (rm or 0) > 0,
+                           "text": f"Saída {EXIT_PT.get(r.exit_reason, r.exit_reason or '')}"
+                                   + (f" {rm:+.2f}R" if rm is not None else "")})
+        if r.status in ("OPEN", "PARTIAL"):
+            # the latest adjusted bar has factor 1, so raw position prices line up with the chart's last bars
+            position = {"entry": float(r.entry_price), "stop": float(r.current_stop), "target": _clean(r.target_price)}
     return {
         "ticker": ticker,
         "candles": candles,
@@ -386,8 +403,29 @@ def build_chart(ctx: TerminalContext, ticker: str, period: str = "1A") -> dict[s
                      "text": f"{SETUP_PT.get(r.setup, r.setup)} — {DISPOSITION_PT.get(r.disposition, r.disposition)}"
                              + (f": {r.reason}" if r.reason else "")}
                     for r in sig.itertuples()] if not sig.empty else [],
+        "trades": [t for t in trades if t["time"] in set(ts)],
+        "position": position,
         "adjusted": True,
     }
+
+
+def build_checklist_api(ctx: TerminalContext, ticker: str) -> dict[str, Any]:
+    ticker = ticker.upper()
+    if not ctx.store.exists(ticker):
+        raise HTTPException(404, f"Sem cotações para {ticker}")
+
+    def compute() -> dict[str, Any]:
+        from ts.app.checklist import checklist_for
+        from ts.core.config import load_strategy_config
+
+        cfg, _ = load_strategy_config(ctx.path("config/strategy.yaml"))
+        return checklist_for(ctx.root, ctx.store, ctx.path(ctx.settings.system.corporate_actions_path), ticker,
+                             ctx.settings.mt5.ibov_symbol.upper(), cfg)
+
+    try:
+        return ctx.cached(f"checklist:{ticker}", ctx.data_stamp(), compute)  # type: ignore[no-any-return]
+    except KeyError as e:
+        raise HTTPException(404, f"Sem cotações para {ticker}") from e
 
 
 def build_positions(ctx: TerminalContext) -> list[dict[str, Any]]:
@@ -570,6 +608,10 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
     @app.get("/api/chart/{ticker}")
     def chart(ticker: str, period: str = "1A") -> dict[str, Any]:
         return build_chart(ctx, ticker, period)
+
+    @app.get("/api/checklist/{ticker}")
+    def checklist(ticker: str) -> dict[str, Any]:
+        return build_checklist_api(ctx, ticker)
 
     @app.get("/api/positions")
     def positions() -> list[dict[str, Any]]:

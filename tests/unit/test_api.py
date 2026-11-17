@@ -68,6 +68,42 @@ def test_watchlist_and_chart(client: TestClient) -> None:
     assert client.get("/api/chart/NAOEXISTE").status_code == 404
 
 
+def test_checklist_endpoint(client: TestClient) -> None:
+    rows = client.get("/api/watchlist").json()
+    t = next(r["ticker"] for r in rows if not r["is_index"])
+    d = client.get(f"/api/checklist/{t}").json()
+    assert d["ticker"] == t and len(d["common"]) == 3
+    ids = {s["id"]: s for s in d["setups"]}
+    assert set(ids) == {"A", "B", "C", "D", "E"} and ids["A"]["total"] >= 5
+    assert all({"label", "ok", "value", "limit"} <= set(c) for c in ids["A"]["conditions"])
+    assert client.get("/api/checklist/NAOEXISTE").status_code == 404
+
+
+@pytest.mark.parametrize("router", [False, True])
+def test_checklist_agrees_with_signal_engine(router: bool) -> None:
+    """The Raio-X only explains: 'SINAL' must match 'every condition passed' on every day, and both must match
+    what the signal engine + regime router decide."""
+    from ts.app.checklist import build_checklist
+    from ts.core.config import StrategyConfig
+
+    bars, ibov, sessions = market(320)
+    cfg = StrategyConfig()
+    cfg.market_filter.require_bull_regime = False
+    cfg.min_history_bars = 120
+    cfg.regime_router.enabled = router
+    seen = 0
+    for t, df in list(bars.items())[:4]:
+        for d in sessions[-60::3]:
+            r = build_checklist(t, df[df["session_date"] <= d], ibov[ibov["session_date"] <= d], cfg)
+            for s in r["setups"]:
+                if not s["total"]:
+                    continue
+                all_ok = r["common_ok"] and all(c["ok"] for c in s["conditions"])
+                assert s["fired"] == all_ok, (t, d, s)
+                seen += 1
+    assert seen > 0
+
+
 def test_empty_terminal_tabs(client: TestClient) -> None:
     assert client.get("/api/positions").json() == []
     assert client.get("/api/orders").json() == []
