@@ -167,6 +167,21 @@ class PaperRepository:
                  f"drawdown {state.breaker.drawdown:.2%}"),
             )
 
+    def record_intent(self, intent: Any, config_hash: str) -> None:
+        """Live pre-open orders built from the book (partials, exits, entries) — idempotent by client_order_id."""
+        price = intent.limit_price if getattr(intent, "limit_price", None) is not None else intent.price
+        self.conn.execute(
+            """INSERT OR IGNORE INTO order_intents (client_order_id, signal_id, position_id, ticker, side, qty, order_type,
+                   price, stop_loss, valid_until, reason, mode, created_at, entry_kind, is_shadow, config_hash)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)""",
+            (intent.client_order_id, intent.signal_id if self.conn.execute(
+                "SELECT 1 FROM signals WHERE signal_id=?", (intent.signal_id,)).fetchone() else None,
+             intent.position_id, intent.ticker, intent.side, intent.qty, intent.order_type,
+             float(price) if price is not None else None,
+             float(intent.stop_loss) if intent.stop_loss is not None else None,
+             intent.valid_until.isoformat(), intent.reason, self.mode, _now(), intent.order_type, config_hash),
+        )
+
     def mark_submitted(self, cid: str, detail: str, broker_order_id: str | None = None, retcode: int | None = None,
                        state: str = "SUBMITTED") -> None:
         self.conn.execute(

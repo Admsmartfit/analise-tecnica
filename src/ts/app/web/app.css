@@ -134,3 +134,11 @@ dialog .row { display: flex; justify-content: space-between; align-items: center
 .kpi .l { color: var(--muted); font-size: 11px; } .kpi .v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 #equity-chart { min-height: 160px; position: relative; }
 #equity-chart .empty { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; }
+
+/* ---------------------------------------------------------------- quarentena / candidata */
+.banner.q { background: color-mix(in srgb, var(--danger) 22%, var(--panel)); color: var(--text); display: flex; gap: 12px; justify-content: center; align-items: center; }
+.banner.cfgerr { background: var(--danger); color: #fff; }
+.banner button { padding: 2px 10px; }
+#dlg-candidate { max-width: 720px; }
+.report { max-height: 320px; overflow: auto; white-space: pre-wrap; font-size: 11px; background: var(--panel-2); padding: 8px; border-radius: 6px; }
+.diff td, .diff th { padding: 3px 8px; }

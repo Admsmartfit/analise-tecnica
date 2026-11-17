@@ -104,18 +104,50 @@ class MT5Broker:
             action, otype = self._c("TRADE_ACTION_PENDING"), self._c("ORDER_TYPE_BUY_LIMIT" if side_buy else "ORDER_TYPE_SELL_LIMIT")
         elif intent.order_type == "STOP":
             action, otype = self._c("TRADE_ACTION_PENDING"), self._c("ORDER_TYPE_BUY_STOP" if side_buy else "ORDER_TYPE_SELL_STOP")
+        elif intent.order_type == "STOP_LIMIT":
+            action = self._c("TRADE_ACTION_PENDING")
+            otype = self._c("ORDER_TYPE_BUY_STOP_LIMIT" if side_buy else "ORDER_TYPE_SELL_STOP_LIMIT")
         else:
             raise ConfigError(f"Unsupported order type {intent.order_type}")
         sym = mt5.symbol_info(intent.ticker)
         filling = self._filling_for(sym)
-        return {
+        req = {
             "action": action, "symbol": intent.ticker, "volume": float(intent.qty), "type": otype, "price": price,
-            "sl": float(intent.stop_loss) if intent.stop_loss else 0.0, "tp": 0.0, "deviation": 20,
+            "sl": float(intent.stop_loss) if intent.stop_loss else 0.0,
+            "tp": float(intent.take_profit) if intent.take_profit else 0.0, "deviation": 20,
             "magic": self.settings.execution.magic_number, "comment": intent.client_order_id[:31],
             # pending orders valid only for the session (buy-stop T+1, auction protection limit)
             "type_time": self._c("ORDER_TIME_DAY") if action == self._c("TRADE_ACTION_PENDING") else self._c("ORDER_TIME_GTC"),
             "type_filling": filling,
         }
+        if intent.order_type == "STOP_LIMIT":
+            req["stoplimit"] = float(intent.limit_price) if intent.limit_price else price
+        return req
+
+    @staticmethod
+    def audit_entry(intent: OrderIntent) -> None:
+        """RF-02: every BUY carries a server-side stop and its worst-case loss fits the risk budget.
+
+        Worst case = the highest price the order can fill at (LIMIT price, or the STOP-LIMIT cap) minus the stop,
+        times the quantity. Raises OrderRejectedError (logged by the caller) — never sends a naked entry.
+        """
+        if intent.side != "BUY":
+            return
+        if intent.stop_loss is None or intent.stop_loss <= 0:
+            raise OrderRejectedError(f"{intent.client_order_id}: compra sem stop loss não é enviada")
+        if intent.order_type in ("MARKET", "STOP"):
+            raise OrderRejectedError(f"{intent.client_order_id}: compra precisa de preço máximo (LIMIT ou STOP_LIMIT)")
+        worst = intent.limit_price if intent.order_type == "STOP_LIMIT" else intent.price
+        if worst is None or worst <= intent.stop_loss:
+            raise OrderRejectedError(f"{intent.client_order_id}: preço máximo ausente ou abaixo do stop")
+        if intent.take_profit is not None and intent.take_profit <= worst:
+            raise OrderRejectedError(f"{intent.client_order_id}: alvo abaixo do preço de entrada")
+        if intent.risk_budget is not None:
+            worst_loss = (worst - intent.stop_loss) * intent.qty
+            if worst_loss > intent.risk_budget + Decimal("0.01"):
+                raise OrderRejectedError(
+                    f"{intent.client_order_id}: risco no pior preço R$ {worst_loss:.2f} > limite R$ {intent.risk_budget:.2f}"
+                )
 
     def _filling_for(self, sym: Any) -> int:
         """Derive type_filling from the symbol's filling_mode flags (PRD 1.3.1, retcode 10030)."""
@@ -139,6 +171,7 @@ class MT5Broker:
         if term is None or not getattr(term, "trade_allowed", False):
             raise TradingDisabledError("AutoTrading is disabled on the MT5 terminal")
 
+        self.audit_entry(intent)
         existing = self.find_by_client_id(intent.client_order_id)
         if existing is not None:
             return SubmitResult(True, intent.client_order_id, existing.broker_order_id, existing.state,

@@ -196,6 +196,8 @@ class RiskConfig(BaseModel):
     min_risk_efficiency: float = 0.70
     # Ordem de abertura = limitada com preço de proteção (PRD 1.3.1, leilão). Sem fill se a abertura passar disso.
     auction_limit_protection_pct: float = 0.03
+    # Teto de risco embutido na ordem: preço máximo de execução = stop + risco-alvo*(1+x)/qtd. 0 = sem tolerância.
+    max_entry_risk_overshoot_pct: float = 0.0
 
 
 class PortfolioConfig(BaseModel):
@@ -232,6 +234,8 @@ class ProtectionsConfig(BaseModel):
     # Multiplicador de risco enquanto o drawdown estiver entre o nível 1 e o nível 2.
     circuit_breaker_level1_risk_multiplier: float = 0.50
     shadow_sma_period: int = 20
+    # Quarentena também por sequência de perdas (PRD v2.1 ajustado). 0 desliga.
+    quarantine_consecutive_losses: int = 6
     # CUSUM unilateral sobre R (detecção precoce de queda de média do setup).
     cusum_k_sigma: float = 0.5
     cusum_h_sigma: float = 5.0
@@ -346,14 +350,42 @@ def load_strategy_config(path: str | Path | None = None) -> tuple[StrategyConfig
         except Exception as e:
             raise ConfigError(f"Error parsing YAML in {p}: {e}") from e
 
+    cfg, cfg_hash, _ = load_effective_strategy(p, raw)
+    return cfg, cfg_hash
+
+
+def _validate_strategy(raw: dict[str, Any]) -> StrategyConfig:
     try:
-        cfg = StrategyConfig.model_validate(raw)
-        return cfg, strategy_config_hash(cfg)
+        return StrategyConfig.model_validate(raw)
     except ValidationError as e:
         first_err = e.errors()[0]
         loc = ".".join(str(x) for x in first_err.get("loc", []))
         msg = first_err.get("msg", "Invalid value")
         raise ConfigError(f"Invalid strategy configuration at '{loc}': {msg}") from e
+
+
+def load_effective_strategy(path: Path, raw: dict[str, Any] | None = None) -> tuple[StrategyConfig, str, Any]:
+    """Base strategy.yaml + approved override, validated against the guardrails (strategy_default.yaml).
+
+    Returns (config, hash of the effective config, EffectiveConfig with override status / base hash).
+    """
+    from ts.core.guardrails import apply_override, check_limits, load_limits, load_override
+
+    if raw is None:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    base_cfg = _validate_strategy(raw)
+    base_hash = strategy_config_hash(base_cfg)
+    base_dump = base_cfg.model_dump(mode="json")
+    limits = load_limits(path.parent)
+    eff = apply_override(base_dump, base_hash, load_override(path.parent), limits)
+    if eff.violations:
+        raise ConfigError("strategy.override.yaml viola as travas: " + "; ".join(eff.violations))
+    cfg = _validate_strategy(eff.raw) if eff.override_status == "applied" else base_cfg
+    if limits is not None:
+        problems = check_limits(cfg.model_dump(mode="json"), limits)
+        if problems:
+            raise ConfigError("Configuração fora das travas de strategy_default.yaml: " + "; ".join(problems))
+    return cfg, strategy_config_hash(cfg), eff
 
 
 def load_costs_config(path: str | Path | None = None) -> CostsConfig:

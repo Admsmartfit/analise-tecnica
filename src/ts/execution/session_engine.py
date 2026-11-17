@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from typing import Any
 
@@ -33,7 +33,7 @@ from ts.risk.portfolio import PortfolioRiskManager, compute_betas
 from ts.risk.protections import AssetCooldownTracker, CircuitBreaker, SetupStatisticalMonitor
 from ts.risk.sizing import SizingResult, calculate_position_size
 from ts.strategy.regime import regime_tier
-from ts.strategy.setups import ceil_tick
+from ts.strategy.setups import ceil_tick, floor_tick
 from ts.strategy.signal_engine import SignalEngine, TickerData
 
 logger = logging.getLogger("ts.execution.session_engine")
@@ -83,6 +83,9 @@ class PendingOrder:
     reason: str = ""
     exit_reason: str | None = None
     position_id: str | None = None
+    risk_budget: float | None = None  # BRL the trade may lose at the stop (sizing target)
+    max_fill_price: float | None = None  # risk cap: highest acceptable fill (stop-limit / auction limit)
+    target_price: float | None = None  # absolute take-profit sent with the entry (mean-reversion setups)
 
 
 @dataclass
@@ -159,7 +162,8 @@ class BookState:
             monitor=SetupStatisticalMonitor(p.setup_monitor_window, p.setup_bootstrap_quantile, reference_r,
                                             p.cusum_k_sigma, p.cusum_h_sigma),
             breaker=CircuitBreaker(p.circuit_breaker_dd_level1, p.circuit_breaker_dd_level2, p.shadow_sma_period,
-                                   capital, p.circuit_breaker_level1_risk_multiplier),
+                                   capital, p.circuit_breaker_level1_risk_multiplier,
+                                   p.quarantine_consecutive_losses),
         )
 
     # ---------------------------------------------------------------- (de)serialization for paper mode
@@ -198,6 +202,7 @@ class BookState:
             "breaker": {
                 "peak": b.peak_equity, "current": b.current_equity, "shadow": b.shadow_equity_curve[-400:],
                 "halted": b.is_halted, "sessions_halted": b.sessions_halted, "dd": b.drawdown,
+                "loss_streak": b.loss_streak, "halt_reason": b.halt_reason,
             },
         }
 
@@ -235,6 +240,8 @@ class BookState:
             b.peak_equity, b.current_equity = float(br["peak"]), float(br["current"])
             b.shadow_equity_curve = [float(x) for x in br["shadow"]] or [b.current_equity]
             b.is_halted, b.sessions_halted, b.drawdown = bool(br["halted"]), int(br["sessions_halted"]), float(br["dd"])
+            b.loss_streak = int(br.get("loss_streak", 0))
+            b.halt_reason = br.get("halt_reason")
         return st
 
 
@@ -321,6 +328,7 @@ class SessionEngine:
         plan: bool = True,
     ) -> SessionResult:
         res = SessionResult(session_date=d)
+        state.breaker.just_halted = False
         bars_today: dict[str, tuple[int, dict[str, float]]] = {}
         for t, td in prepared.items():
             b = self._bar(td, d)
@@ -373,12 +381,19 @@ class SessionEngine:
             fill: float | None = None
             if o.kind == "OPEN_AUCTION":
                 if o.limit_price is not None and b["open"] > o.limit_price:
-                    res.expired.append((o, f"auction open {b['open']:.2f} above protection {o.limit_price:.2f}"))
+                    res.expired.append((o, f"abertura {b['open']:.2f} acima do preço máximo {o.limit_price:.2f} "
+                                           "(proteção do leilão / teto de risco)"))
                     continue
                 fill = b["open"] * (1.0 + slip)
             elif o.kind == "BUY_STOP":
                 if b["high"] >= o.entry_ref:
-                    fill = max(b["open"], o.entry_ref) * (1.0 + slip)
+                    base = max(b["open"], o.entry_ref)
+                    if o.max_fill_price is not None and base > o.max_fill_price:
+                        # stop-limit: gap above the risk cap -> no fill
+                        res.expired.append((o, f"gap: abertura {b['open']:.2f} acima do teto de risco "
+                                               f"{o.max_fill_price:.2f}"))
+                        continue
+                    fill = base * (1.0 + slip)
             if fill is None:
                 if o.valid_until > d:
                     keep.append(o)
@@ -396,8 +411,8 @@ class SessionEngine:
             else:
                 state.shadow_realized -= fees
             risk_ps = fill - o.stop_price
-            target = None
-            if o.target_r is not None and risk_ps > 0:
+            target = o.target_price  # absolute TP sent with the entry (planned the night before)
+            if target is None and o.target_r is not None and risk_ps > 0:  # snapshots from older versions
                 target = ceil_tick(fill + o.target_r * risk_ps, self.cfg.risk.tick_size)
             pos = PositionRecord(
                 position_id=o.client_order_id,
@@ -452,6 +467,10 @@ class SessionEngine:
                 params = self.exit_params(pos.setup)
                 high = b["high"]
                 key = ("S:" if shadow else "") + ticker
+                if key in opened_today and params.partial_target_r is not None:
+                    # Live: the partial is a SELL LIMIT placed at the next pre-open (the fill price is only known
+                    # after the auction). Stop and final target ride with the entry order from day one.
+                    params = replace(params, partial_target_r=None)
                 if key in opened_today and pos.extra.get("entry_kind_stop"):
                     # Buy-stop filled intraday: the bar's high before the fill is unknowable -> conservative.
                     high = max(pos.entry_price, b["close"])
@@ -535,6 +554,7 @@ class SessionEngine:
         if not pos.is_shadow:
             if reason == ExitReason.STOP:
                 state.cooldown.record_stop(pos.ticker, d)
+            state.breaker.record_trade(trade.r_multiple)
             if state.monitor.record_trade(pos.setup, trade.r_multiple):
                 res.notes.append(f"SETUP_SUSPENDED {pos.setup}: {state.monitor.suspended_setups.get(pos.setup)}")
 
@@ -652,14 +672,24 @@ class SessionEngine:
         cid = client_order_id(self.prefix, nd, sig.ticker, tag)
         setup_cfg = getattr(self.cfg.setups, sig.setup.value)
         target_r = getattr(setup_cfg, "final_target_r", None) if sig.trade_class == TradeClass.MEAN_REVERSION else None
+        tick = self.cfg.risk.tick_size
+        # RF-02 (risk audit) built into the order itself: highest fill price whose loss at the stop still fits the
+        # risk budget. The auction order is a LIMIT at min(protection, risk cap); the breakout order is a STOP-LIMIT
+        # capped at the same price. A gap beyond it simply does not fill — no intraday logic, same in paper and live.
+        budget = sz.target_risk_brl * (1.0 + self.cfg.risk.max_entry_risk_overshoot_pct)
+        risk_cap = floor_tick(sz.stop_price + budget / sz.qty, tick)
         limit = None
         if sig.entry_type == "OPEN_AUCTION":
-            limit = ceil_tick(sig.entry_ref * (1.0 + self.cfg.risk.auction_limit_protection_pct), self.cfg.risk.tick_size)
+            limit = min(ceil_tick(sig.entry_ref * (1.0 + self.cfg.risk.auction_limit_protection_pct), tick), risk_cap)
+        target_price = None
+        if target_r is not None:
+            target_price = ceil_tick(sig.entry_ref + target_r * (sig.entry_ref - sz.stop_price), tick)
         o = PendingOrder(
             client_order_id=cid, signal_id=sig.signal_id, ticker=sig.ticker, side="BUY", kind=sig.entry_type,
             qty=sz.qty, entry_ref=sig.entry_ref, limit_price=limit, stop_price=sz.stop_price, target_r=target_r,
             setup=sig.setup.value, trade_class=sig.trade_class.value, valid_until=nd, is_shadow=shadow,
             reason=f"Setup {sig.setup.value} decided {d}",
+            risk_budget=round(budget, 2), max_fill_price=risk_cap, target_price=target_price,
         )
         state.pending.append(o)
         if res is not None:

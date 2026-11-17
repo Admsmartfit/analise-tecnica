@@ -99,6 +99,7 @@ risk:
   tick_size: 0.01
   min_risk_efficiency: 0.70
   auction_limit_protection_pct: 0.03
+  max_entry_risk_overshoot_pct: 0.0   # gap acima do teto de risco = ordem não executa
 
 portfolio:
   max_heat_pct: 0.05
@@ -137,5 +138,6 @@ protections:
   circuit_breaker_dd_level2: 0.12
   circuit_breaker_level1_risk_multiplier: 0.50
   shadow_sma_period: 20
+  quarantine_consecutive_losses: 6   # quarentena por sequência de perdas (0 desliga)
   cusum_k_sigma: 0.5
   cusum_h_sigma: 5.0

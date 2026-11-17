@@ -152,6 +152,7 @@ class CircuitBreaker:
         shadow_sma_period: int = 20,
         initial_equity: float = 100000.0,
         level1_risk_multiplier: float = 0.5,
+        consecutive_losses_limit: int = 0,
     ) -> None:
         self.dd_level1 = dd_level1
         self.dd_level2 = dd_level2
@@ -163,6 +164,32 @@ class CircuitBreaker:
         self.is_halted = False
         self.sessions_halted = 0
         self.drawdown = 0.0
+        self.consecutive_losses_limit = consecutive_losses_limit
+        self.loss_streak = 0
+        self.halt_reason: str | None = None
+        self.just_halted = False  # True only on the session the quarantine started (triggers re-optimization)
+
+    def record_trade(self, r_multiple: float) -> None:
+        """Closed real trade: tracks the losing streak (quarantine trigger 2, PRD v2.1 ajustado)."""
+        self.loss_streak = self.loss_streak + 1 if r_multiple < 0 else 0
+        if (not self.is_halted and self.consecutive_losses_limit > 0
+                and self.loss_streak >= self.consecutive_losses_limit):
+            self._halt(f"{self.loss_streak} perdas consecutivas")
+
+    def _halt(self, reason: str) -> None:
+        self.is_halted = True
+        self.sessions_halted = 0
+        self.halt_reason = reason
+        self.just_halted = True
+
+    def resume(self, equity: float, reason: str = "") -> None:
+        """Leave quarantine (shadow curve recovered or trader approved a new configuration)."""
+        self.is_halted = False
+        self.sessions_halted = 0
+        self.peak_equity = equity
+        self.drawdown = 0.0
+        self.loss_streak = 0
+        self.halt_reason = None
 
     def update(self, equity: float, shadow_equity: float) -> None:
         """Feed today's real equity and shadow-curve value (real equity + shadow book P&L)."""
@@ -178,13 +205,9 @@ class CircuitBreaker:
             if self.sessions_halted >= p and len(self.shadow_equity_curve) >= p:
                 sma = float(np.mean(self.shadow_equity_curve[-p:]))
                 if shadow_equity > sma:
-                    self.is_halted = False
-                    self.sessions_halted = 0
-                    self.peak_equity = equity
-                    self.drawdown = 0.0
+                    self.resume(equity, "curva sombra acima da média")
         elif self.drawdown >= self.dd_level2:
-            self.is_halted = True
-            self.sessions_halted = 0
+            self._halt(f"drawdown {self.drawdown:.1%} >= {self.dd_level2:.0%}")
 
     def update_equity(self, current_equity: float, shadow_delta: float = 0.0) -> None:
         """Backward-compatible API: shadow curve advanced by ``shadow_delta``."""

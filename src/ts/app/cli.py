@@ -261,6 +261,49 @@ def update_command(args: argparse.Namespace) -> int:
     return code
 
 
+def reoptimize_command(args: argparse.Namespace) -> int:
+    """Quarantine re-optimization (started by the EOD; can be run by hand)."""
+    from ts.app.autoheal import run_reoptimization
+
+    settings = load_settings()
+    setup_logging(settings.system.logs_dir, settings.logging.level, settings.logging.json_lines, console=False)
+    cid = run_reoptimization(settings, args.reason or "execução manual", args.regime or "")
+    console.print(f"Reotimização {cid} concluída. Veja `python -m ts config status`.")
+    return 0
+
+
+def config_command(args: argparse.Namespace) -> int:
+    """Quarantine candidates: status / approve / reject."""
+    import json
+
+    from ts.app.autoheal import approve, reject
+    from ts.core.errors import ConfigError
+
+    settings = load_settings()
+    setup_logging(settings.system.logs_dir, settings.logging.level, settings.logging.json_lines)
+    try:
+        if args.action == "approve":
+            for line in approve(settings, args.id, args.note or ""):
+                console.print(line)
+            return 0
+        if args.action == "reject":
+            reject(settings, args.id, args.note or "")
+            console.print(f"Candidata {args.id} rejeitada.")
+            return 0
+    except ConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        return 2
+    db = DatabaseManager(settings.system.db_path)
+    rows = db.get_conn().execute(
+        "SELECT candidate_id, created_at, status, trigger_reason, params_json, report_path FROM config_candidates "
+        "ORDER BY created_at DESC LIMIT 10").fetchall()
+    if not rows:
+        console.print("Nenhuma reotimização registrada.")
+    for r in rows:
+        console.print(f"{r[0]}  {r[2]:<10} {r[1][:16]}  {r[3]}\n    parâmetros: {json.loads(r[4] or '{}')}  relatório: {r[5]}")
+    return 0
+
+
 def ui_command(args: argparse.Namespace) -> int:
     """Open the visual terminal (local API + desktop window)."""
     from ts.app.desktop import run_ui
@@ -445,6 +488,15 @@ def main() -> None:
     subparsers.add_parser("version", help="Mostra a versão instalada e se há atualização")
     subparsers.add_parser("update", help="Atualiza agora a partir do GitHub (com testes e rollback)")
 
+    ro_p = subparsers.add_parser("reoptimize", help="Reotimização da quarentena (dentro das travas)")
+    ro_p.add_argument("--reason", type=str, default="")
+    ro_p.add_argument("--regime", type=str, default="")
+
+    cf_p = subparsers.add_parser("config", help="Candidatas da quarentena: status | approve ID | reject ID")
+    cf_p.add_argument("action", choices=["status", "approve", "reject"])
+    cf_p.add_argument("id", nargs="?", default="")
+    cf_p.add_argument("--note", type=str, default="")
+
     ui_p = subparsers.add_parser("ui", help="Abre o terminal visual (janela desktop)")
     ui_p.add_argument("--port", type=int, default=8765)
     ui_p.add_argument("--browser", action="store_true", help="Abrir no navegador em vez da janela")
@@ -462,6 +514,10 @@ def main() -> None:
         sys.exit(version_command(args))
     if args.command == "update":
         sys.exit(update_command(args))
+    if args.command == "reoptimize":
+        sys.exit(reoptimize_command(args))
+    if args.command == "config":
+        sys.exit(config_command(args))
     if args.command == "ui":
         sys.exit(ui_command(args))
     if args.command == "notify":

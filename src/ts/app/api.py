@@ -164,9 +164,12 @@ def build_status(ctx: TerminalContext, now: datetime | None = None) -> dict[str,
     snap = ctx.query("SELECT session_date, state_json FROM book_snapshots ORDER BY session_date DESC LIMIT 1")
     last_processed = None if snap.empty else snap["session_date"].iloc[0]
     cb_level, cb_dd = 0, 0.0
+    quarantine = {"active": False, "reason": None, "loss_streak": 0}
     if not snap.empty:
         try:
             br = json.loads(snap["state_json"].iloc[0]).get("breaker", {})
+            quarantine = {"active": bool(br.get("halted")), "reason": br.get("halt_reason"),
+                          "loss_streak": int(br.get("loss_streak", 0))}
             cb_dd = float(br.get("dd", 0.0))
             cb_level = 2 if br.get("halted") else (1 if cb_dd >= ctx.dd_level1 else 0)
         except (ValueError, TypeError):
@@ -194,10 +197,51 @@ def build_status(ctx: TerminalContext, now: datetime | None = None) -> dict[str,
         "eod_pending": last_processed is None or last_processed < last_closed.isoformat(),
         "equity": None if eq.empty else {k: _clean(v) for k, v in eq.iloc[0].items()},
         "circuit_breaker": {"level": cb_level, "drawdown": cb_dd},
+        "quarantine": quarantine,
+        "candidate": _latest_candidate(ctx),
+        "override": _override_status(ctx),
         "reference_capital": s.execution.reference_capital,
         "version": _version_info(ctx),
         "server_time": (now or datetime.now()).isoformat(timespec="seconds"),
     }
+
+
+def _latest_candidate(ctx: TerminalContext) -> dict[str, Any] | None:
+    df = ctx.query("SELECT candidate_id, created_at, status, trigger_reason, market_regime, params_json, summary_json "
+                   "FROM config_candidates WHERE status IN ('RUNNING', 'PENDING') ORDER BY created_at DESC LIMIT 1")
+    if df.empty:
+        return None
+    r = df.iloc[0]
+    return {"id": r["candidate_id"], "status": r["status"], "created_at": r["created_at"], "reason": r["trigger_reason"],
+            "regime": r["market_regime"], "params": json.loads(r["params_json"] or "{}"),
+            "summary": json.loads(r["summary_json"] or "{}")}
+
+
+def _override_status(ctx: TerminalContext) -> dict[str, Any]:
+    try:
+        from ts.core.config import load_effective_strategy
+
+        _, h, eff = load_effective_strategy(ctx.root / "config" / "strategy.yaml")
+        return {"status": eff.override_status, "hash": h,
+                "candidate_id": (eff.override or {}).get("candidate_id"), "error": None}
+    except Exception as e:  # noqa: BLE001 - shown in the UI instead of breaking the status
+        return {"status": "error", "hash": None, "candidate_id": None, "error": str(e)}
+
+
+def build_candidates(ctx: TerminalContext) -> list[dict[str, Any]]:
+    df = ctx.query("SELECT candidate_id, created_at, status, trigger_reason, market_regime, params_json, summary_json, "
+                   "report_path, decided_at, decision_note FROM config_candidates ORDER BY created_at DESC LIMIT 20")
+    out = []
+    for r in df.itertuples():
+        report = None
+        if r.status == "PENDING" and r.report_path:
+            p = ctx.path(r.report_path)
+            report = p.read_text(encoding="utf-8") if p.exists() else None
+        out.append({"id": r.candidate_id, "created_at": r.created_at, "status": r.status, "reason": r.trigger_reason,
+                    "regime": r.market_regime, "params": json.loads(r.params_json or "{}"),
+                    "summary": json.loads(r.summary_json or "{}"), "report": report,
+                    "decided_at": r.decided_at, "note": r.decision_note})
+    return out
 
 
 def _version_info(ctx: TerminalContext) -> dict[str, Any]:
@@ -411,10 +455,10 @@ def build_runs(ctx: TerminalContext) -> list[dict[str, Any]]:
 
 
 # ====================================================================================== actions
-ACTIONS = {"eod", "sync", "update"}
+ACTIONS = {"eod", "sync", "update", "approve", "reject"}
 
 
-def start_job(ctx: TerminalContext, kind: str) -> Job:
+def start_job(ctx: TerminalContext, kind: str, arg: str | None = None) -> Job:
     with ctx._lock:
         if any(j.status == "running" for j in ctx.jobs.values()):
             raise HTTPException(409, "Já existe uma ação em andamento. Aguarde terminar.")
@@ -429,7 +473,12 @@ def start_job(ctx: TerminalContext, kind: str) -> Job:
                 code, msg = run_update(ctx.root)
                 job.code, job.message = code, msg
             else:
-                args = ["eod", "--asof", ctx.last_closed_session().isoformat()] if kind == "eod" else ["sync"]
+                if kind == "eod":
+                    args = ["eod", "--asof", ctx.last_closed_session().isoformat()]
+                elif kind in ("approve", "reject"):
+                    args = ["config", kind, arg or "", "--note", "via terminal"]
+                else:
+                    args = ["sync"]
                 env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
                 proc = subprocess.run([sys.executable, "-m", "ts", *args], cwd=ctx.root, capture_output=True, text=True,
                                       encoding="utf-8", errors="replace", timeout=3600, env=env,
@@ -511,16 +560,23 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
     def equity() -> dict[str, Any]:
         return build_equity(ctx)
 
+    @app.get("/api/candidates")
+    def candidates() -> list[dict[str, Any]]:
+        return build_candidates(ctx)
+
     @app.get("/api/runs")
     def runs() -> list[dict[str, Any]]:
         return build_runs(ctx)
 
     @app.post("/api/actions/{kind}")
-    def action(kind: str, x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:
+    def action(kind: str, id: str | None = None, x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:  # noqa: A002
         check_token(x_ts_token)
         if kind not in ACTIONS:
             raise HTTPException(404, "Ação desconhecida")
-        job = start_job(ctx, kind)
+        if kind in ("approve", "reject"):
+            if not id or not all(ch.isalnum() or ch == "-" for ch in id):
+                raise HTTPException(400, "Candidata inválida")
+        job = start_job(ctx, kind, id)
         return {"job": job.id}
 
     @app.get("/api/jobs/{job_id}")

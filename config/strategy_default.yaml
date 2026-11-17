@@ -1,0 +1,61 @@
+# TRAVAS DO TRADER — nunca escritas pelo sistema (PRD v2.1, versão ajustada).
+#
+# Toda configuração efetiva (strategy.yaml + strategy.override.yaml aprovado) é validada contra este arquivo.
+# Se algum parâmetro sair destes limites, a configuração NÃO carrega: o EOD falha em modo seguro e avisa.
+# A reotimização da quarentena só testa combinações da grade abaixo, e só dentro destes limites.
+
+version: 1
+
+limits:
+  # Risco por operação: 1% até o fim do piloto real (PRD 1.2.1)
+  risk.risk_per_trade_pct: {min: 0.0025, max: 0.01}
+  risk.stop_atr_min_k: {min: 0.75, max: 1.5}
+  risk.stop_atr_max_k: {min: 2.0, max: 3.0}
+  risk.capital_cap_pct: {min: 0.05, max: 0.20}
+  risk.gap_cap_pct: {min: 0.005, max: 0.02}
+  risk.auction_limit_protection_pct: {min: 0.005, max: 0.05}
+  risk.max_entry_risk_overshoot_pct: {min: 0.0, max: 0.10}
+  portfolio.max_heat_pct: {min: 0.01, max: 0.05}
+  portfolio.max_correlated_risk_pct: {min: 0.01, max: 0.03}
+  portfolio.max_positions_per_cluster: {min: 1, max: 3}
+  protections.circuit_breaker_dd_level1: {min: 0.04, max: 0.08}
+  protections.circuit_breaker_dd_level2: {min: 0.06, max: 0.12}
+  protections.quarantine_consecutive_losses: {min: 0, max: 10}
+  market_filter.ibov_sma_long: {min: 150, max: 250}
+  market_filter.ibov_sma_short: {min: 20, max: 60}
+  pivot.magnitude_atr_k: {min: 0.5, max: 1.5}
+  setups.A.adx_threshold: {min: 15, max: 30}
+  setups.A.rvol_min: {min: 1.0, max: 2.0}
+  setups.A.trailing_chandelier_k: {min: 2.0, max: 4.0}
+  setups.B.rsi_max: {min: 40, max: 50}
+  setups.B.min_rr_filter: {min: 2.0, max: 3.0}
+  setups.B.final_target_r: {min: 2.0, max: 3.0}
+  setups.B.partial_target_r: {min: 1.0, max: 2.0}
+  setups.B.time_stop_bars: {min: 5, max: 15}
+  setups.C.adx_threshold: {min: 15, max: 30}
+  setups.C.rvol_min: {min: 1.0, max: 2.0}
+  setups.D.rvol_min: {min: 1.0, max: 2.0}
+  setups.D.squeeze_percentile_q: {min: 5, max: 20}
+  setups.D.trailing_chandelier_k: {min: 2.0, max: 4.0}
+  setups.E.min_rr_filter: {min: 2.0, max: 3.0}
+  setups.E.final_target_r: {min: 2.0, max: 3.0}
+
+# Nunca alterados pela reotimização (prefixos de caminho). Só o trader muda, no strategy.yaml, via git.
+frozen:
+  - risk
+  - portfolio
+  - protections
+  - regime
+  - min_history_bars
+  - asset_trend_sma
+  - market_filter.require_bull_regime
+
+reoptimization:
+  # Combinações testadas quando a quarentena dispara (todas dentro dos limites acima).
+  grid:
+    market_filter.ibov_sma_short: [20, 50]
+    setups.A.trailing_chandelier_k: [2.5, 3.0, 3.5]
+    setups.B.rsi_max: [45, 50]
+    setups.B.min_rr_filter: [2.0, 3.0]
+  # Mínimo de operações fora da amostra para uma candidata ser considerada.
+  min_trades: 60

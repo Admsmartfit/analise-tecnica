@@ -140,10 +140,60 @@ async function loadStatus() {
   $('#st-conn').innerHTML = `Fonte: <b>${esc(s.connection.label)}</b>`; $('#st-conn').title = s.connection.detail || '';
   const v = s.version || {};
   $('#st-update').classList.toggle('hidden', !v.update_available);
-  const cb = s.circuit_breaker || {}; const banner = $('#cb-banner');
-  banner.className = 'banner ' + (cb.level === 2 ? 'l2' : cb.level === 1 ? 'l1' : 'hidden');
-  banner.textContent = cb.level === 2 ? `Circuit breaker nível 2: drawdown ${pct(cb.drawdown, 1)} — novas entradas suspensas; sinais seguem na carteira sombra.`
-    : cb.level === 1 ? `Circuit breaker nível 1: drawdown ${pct(cb.drawdown, 1)} — risco por operação reduzido.` : '';
+  renderBanner(s);
+}
+
+function renderBanner(s) {
+  const cb = s.circuit_breaker || {}; const q = s.quarantine || {}; const cand = s.candidate; const ov = s.override || {};
+  const banner = $('#cb-banner');
+  if (ov.status === 'error') {
+    banner.className = 'banner cfgerr';
+    banner.textContent = `Configuração inválida — o EOD não roda até corrigir: ${ov.error}`;
+    return;
+  }
+  if (q.active) {
+    banner.className = 'banner q';
+    let tail = '';
+    if (cand && cand.status === 'RUNNING') tail = ' Reotimização em andamento…';
+    else if (cand && cand.status === 'PENDING') tail = ' <button type="button" id="btn-candidate" class="primary">Revisar candidata</button>';
+    else tail = ' A volta acontece quando a curva sombra se recuperar.';
+    banner.innerHTML = `<span>🛑 <b>Quarentena</b>: ${esc(q.reason || 'drawdown')}. Nenhuma entrada nova; stops, alvos e saídas das posições abertas seguem normalmente.</span>${tail}`;
+    $('#btn-candidate')?.addEventListener('click', openCandidate);
+    return;
+  }
+  if (cand && cand.status === 'PENDING') {
+    banner.className = 'banner l1';
+    banner.innerHTML = 'Há uma configuração candidata aguardando decisão. <button type="button" id="btn-candidate">Revisar</button>';
+    $('#btn-candidate').addEventListener('click', openCandidate);
+    return;
+  }
+  if (ov.status === 'stale') {
+    banner.className = 'banner l1';
+    banner.textContent = 'strategy.yaml mudou depois da última aprovação: a configuração aprovada foi descartada e vale a base do git.';
+    return;
+  }
+  banner.className = 'banner ' + (cb.level === 1 ? 'l1' : 'hidden');
+  banner.textContent = cb.level === 1 ? `Circuit breaker nível 1: drawdown ${pct(cb.drawdown, 1)} — risco por operação reduzido.` : '';
+}
+
+async function openCandidate() {
+  const list = await api('/api/candidates'); const c = list.find((x) => x.status === 'PENDING');
+  if (!c) { toast('Nenhuma candidata pendente.'); return; }
+  const sm = c.summary || {};
+  $('#dlg-candidate-body').innerHTML = `
+    <p><b>Motivo da quarentena:</b> ${esc(c.reason)}<br><b>Regime:</b> ${esc(c.regime || '—')}</p>
+    <p>Testada em todo o histórico dentro das suas travas: esperança <b>${fmt(sm.expectancy_r, 3)}R</b>
+      (IC 95% inferior ${fmt(sm.ci_lower, 3)}R), ${sm.trades ?? '—'} operações, DSR ${fmt(sm.dsr)}, PBO da grade ${fmt(sm.pbo)}.</p>
+    <table class="grid diff"><thead><tr><th>Parâmetro</th><th class="num">Novo valor</th></tr></thead><tbody>
+      ${Object.entries(c.params).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td class="num">${esc(v)}</td></tr>`).join('')}
+    </tbody></table>
+    <p class="note">Ao aprovar, a quarentena termina e a contagem do paper reinicia com a nova configuração (PRD 1.4.4).
+      Ao rejeitar, a configuração atual continua e a volta acontece pela curva sombra.</p>`;
+  $('#dlg-candidate-report').textContent = c.report || '';
+  const dlg = $('#dlg-candidate'); dlg.showModal();
+  $('#dlg-candidate-close').onclick = () => dlg.close();
+  $('#dlg-candidate-approve').onclick = async () => { dlg.close(); await runAction(`approve?id=${encodeURIComponent(c.id)}`, 'Aplicando a configuração aprovada…'); };
+  $('#dlg-candidate-reject').onclick = async () => { dlg.close(); await runAction(`reject?id=${encodeURIComponent(c.id)}`, 'Rejeitando a candidata…'); };
 }
 
 function setupUpdate() {

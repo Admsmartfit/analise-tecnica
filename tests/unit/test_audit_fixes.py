@@ -203,7 +203,8 @@ def _live_settings():  # type: ignore[no-untyped-def]
 def _intent(cid: str = "TS261118PETR4A") -> OrderIntent:
     from decimal import Decimal
 
-    return OrderIntent(cid, None, "PETR4", "BUY", 100, "MARKET", Decimal("30"), Decimal("28.5"), date(2026, 11, 18), "t")
+    return OrderIntent(cid, None, "PETR4", "BUY", 100, "LIMIT", Decimal("30"), Decimal("28.5"), date(2026, 11, 18), "t",
+                       risk_budget=Decimal("200"))
 
 
 def test_mt5_broker_refuses_when_not_live() -> None:
@@ -216,11 +217,26 @@ def test_lost_response_is_reconciled_not_resent() -> None:
     fake.initialize()
     fake.script("order_send", [LOST_RESPONSE])
     br = MT5Broker(fake, _live_settings(), sleep=lambda s: None)
-    r = br.submit(_intent())
-    assert r.success and r.state.value == "FILLED"
+    r = br.submit(_intent())  # LIMIT entry (bracket): rests in the book -> reconciled as ACCEPTED
+    assert r.success and r.state.value == "ACCEPTED"
+    assert len(fake._orders) == 1
+    r2 = br.submit(_intent())  # idempotent: second submit finds the order, does not send it again
+    assert len(fake._orders) == 1 and "idempotent" in r2.message.lower()
+
+
+def test_lost_response_of_filled_order_is_found_in_deals() -> None:
+    from decimal import Decimal
+
+    fake = FakeMT5()
+    fake.initialize()
+    fake.script("order_send", [LOST_RESPONSE])
+    br = MT5Broker(fake, _live_settings(), sleep=lambda s: None)
+    sell = OrderIntent("TS261118PETR4X", None, "PETR4", "SELL", 100, "MARKET", Decimal("30"), None,
+                       date(2026, 11, 18), "saída")
+    r = br.submit(sell)
+    assert r.success and r.state.value == "FILLED" and len(fake._deals) == 1
+    br.submit(sell)
     assert len(fake._deals) == 1
-    r2 = br.submit(_intent())  # idempotent: second submit finds the deal, does not buy again
-    assert len(fake._deals) == 1 and "idempotent" in r2.message.lower()
 
 
 def test_unknown_after_reconciliation_blocks_ticker() -> None:
@@ -243,7 +259,7 @@ def test_migrations_idempotent_and_backup_routine_allowed(tmp_path: Path) -> Non
                  "VALUES ('r','backup','2026-01-02','x','OK','h','v')")
     mem = get_connection(":memory:")
     apply_migrations(mem)
-    assert mem.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 2
+    assert mem.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 3
 
 
 def test_process_lock_is_exclusive(tmp_path: Path) -> None:

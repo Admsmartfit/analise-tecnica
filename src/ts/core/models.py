@@ -118,6 +118,9 @@ class OrderIntent:
     reason: str
     position_id: str | None = None
     mode: Literal["paper", "live"] = "paper"
+    take_profit: Decimal | None = None  # absolute TP attached to the entry (mean-reversion setups)
+    limit_price: Decimal | None = None  # STOP_LIMIT: highest acceptable fill (risk cap)
+    risk_budget: Decimal | None = None  # BRL the entry may lose at the stop; audited before sending
 
 
 @dataclass(frozen=True, slots=True)

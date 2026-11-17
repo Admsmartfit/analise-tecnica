@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import ts
+from ts.app.autoheal import spawn_reoptimization
 from ts.core.calendar import B3Calendar
 from ts.core.config import Settings, load_costs_config, load_settings, load_strategy_config
 from ts.core.errors import ConfigError, ConnectivityError, TSError
@@ -206,6 +207,7 @@ def _eod_locked(
     state = repo.load_state(cfg, settings.execution.reference_capital, cal, before=sessions[0], reference_r=reference_r)
 
     summary: list[str] = []
+    quarantine: tuple[date, str, str] | None = None
     for d in sessions:
         universe = set(universe_on(d))
         held = set(state.positions) | set(state.shadow_positions) | {o.ticker for o in state.pending}
@@ -225,6 +227,12 @@ def _eod_locked(
                                  universe=universe)
         repo.record_session(run_id, res, state, config_hash)
         conn.commit()
+        if state.breaker.just_halted:
+            from ts.strategy.regime import market_state_series
+
+            mstate = market_state_series(ibov, cfg.market_filter).iloc[-1]
+            regime = f"IBOV {mstate}, volatilidade P{rp:.0f}" if rp is not None else f"IBOV {mstate}"
+            quarantine = (d, state.breaker.halt_reason or "quarentena", regime)
         e = res.equity
         assert e is not None
         accepted = sum(1 for s in res.signals if s.disposition == "ACCEPTED")
@@ -239,6 +247,14 @@ def _eod_locked(
 
     db.update_run(run_id, "OK")
     notify(f"✅ EOD concluído {today} ({sync_info}). " + " || ".join(summary))
+    if quarantine is not None:
+        qd, why, regime = quarantine
+        notify(f"🛑 QUARENTENA desde {qd}: {why} ({regime}). Nenhuma entrada nova; saídas das posições abertas "
+               "seguem normalmente. Reotimização iniciada em segundo plano — o resultado chega para sua aprovação.")
+        try:
+            spawn_reoptimization(Path.cwd(), f"{why} em {qd}", regime)
+        except Exception as e:  # noqa: BLE001 - quarantine itself is already in force
+            notify(f"⚠️ Não foi possível iniciar a reotimização: {e!r} (rode `python -m ts reoptimize`)")
     return 0
 
 
@@ -313,24 +329,32 @@ def preopen_routine(
                 db.update_run(run_id, "FAILED", f"reconciliation: {detail}")
                 return 4
 
-            sent = 0
-            for o in [o for o in state.pending if not o.is_shadow and o.valid_until >= today]:
-                if live:
-                    from ts.core.models import OrderIntent
+            from ts.execution.bracket import build_preopen_package
 
-                    order_type = "MARKET" if o.kind == "EXIT_OPEN" else ("STOP" if o.kind == "BUY_STOP" else "LIMIT")
-                    price = None if o.kind == "EXIT_OPEN" else Decimal(str(o.limit_price if o.kind == "OPEN_AUCTION" else o.entry_ref))
-                    intent = OrderIntent(o.client_order_id, o.signal_id, o.ticker, o.side, o.qty, order_type,  # type: ignore[arg-type]
-                                         price, Decimal(str(o.stop_price)) if o.stop_price else None,
-                                         min(o.valid_until, today), o.reason, o.position_id, "live")
+            pkg = build_preopen_package(state, today, cfg, settings.execution.client_id_prefix,
+                                        settings.execution.fractional_shares)
+            sent = 0
+            if live:
+                tickets = {p.ticker: p for p in broker_positions}
+                for su in pkg.stop_updates:  # trailing / break-even decided at the last EOD
+                    bp = tickets.get(su.ticker)
+                    if bp is not None and abs(float(bp.current_stop or 0) - su.stop) > cfg.risk.tick_size / 2:
+                        try:
+                            broker.set_stop(su.ticker, int(bp.position_id), su.stop)
+                        except TSError as e:
+                            notify(f"❌ PREOPEN {today}: falha ao mover o stop de {su.ticker} para {su.stop:.2f} — {e}")
+                for intent in pkg.all_orders:
+                    repo.record_intent(intent, config_hash)
                     try:
                         r = broker.submit(intent)
-                        repo.mark_submitted(o.client_order_id, r.message, r.broker_order_id, r.retcode, r.state.value)
+                        repo.mark_submitted(intent.client_order_id, r.message, r.broker_order_id, r.retcode, r.state.value)
                         sent += 1
                     except TSError as e:
-                        repo.mark_submitted(o.client_order_id, str(e), state="UNKNOWN" if "UNKNOWN" in str(e) else "REJECTED")
-                        notify(f"❌ PREOPEN {today}: ordem {o.client_order_id} — {e}")
-                else:
+                        repo.mark_submitted(intent.client_order_id, str(e),
+                                            state="UNKNOWN" if "UNKNOWN" in str(e) else "REJECTED")
+                        notify(f"❌ PREOPEN {today}: ordem {intent.client_order_id} recusada — {e}")
+            else:
+                for o in [o for o in state.pending if not o.is_shadow and o.valid_until >= today]:
                     repo.mark_submitted(o.client_order_id, "paper: submitted to PaperBroker")
                     repo.mark_submitted(o.client_order_id, "paper: accepted (fill simulated at EOD with the real bar)",
                                         state="ACCEPTED")

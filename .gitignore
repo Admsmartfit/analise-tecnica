@@ -1,4 +1,4 @@
-# Trading System B3 — .gitignore
+# Trading System B3 â€” .gitignore
 
 # Python
 __pycache__/
@@ -74,3 +74,8 @@ htmlcov/
 # Temporary files
 *.tmp
 *.bak
+
+# Configuracao aprovada localmente (reotimizacao da quarentena) - nunca versionar
+config/strategy.override.yaml
+config/strategy.candidate*.yaml
+config/history/
