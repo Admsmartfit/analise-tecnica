@@ -55,7 +55,7 @@ namespace TradingSystemSetup
             Controls.Add(title); Controls.Add(sub);
 
             int y = 84;
-            txtRepo = AddText("Repositório GitHub *", "https://github.com/SEU_USUARIO/SEU_REPO.git", ref y, 554);
+            txtRepo = AddText("Repositório GitHub", BuildInfo.DefaultRepo, ref y, 554);
             txtRoot = AddText("Pasta de instalação", @"C:\TradingSystem", ref y, 480);
             btnBrowse = new Button { Text = "Procurar...", Location = new Point(632, y - 30), Size = new Size(72, 25) };
             btnBrowse.Click += delegate {
@@ -154,7 +154,7 @@ namespace TradingSystemSetup
                     int i = line.IndexOf('=');
                     if (i < 0) continue;
                     string k = line.Substring(0, i), v = line.Substring(i + 1);
-                    if (k == "repo") txtRepo.Text = v;
+                    if (k == "repo" && v.Length > 0) txtRepo.Text = v;
                     else if (k == "root") txtRoot.Text = v;
                     else if (k == "branch") txtBranch.Text = v;
                     else if (k == "provider") cmbProvider.SelectedIndex = v == "mt5" ? 1 : 0;
@@ -199,7 +199,7 @@ namespace TradingSystemSetup
         bool ValidateInputs()
         {
             string repo = txtRepo.Text.Trim();
-            if (repo.Length == 0 || repo.Contains("SEU_USUARIO") ||
+            if (repo.Length == 0 ||
                 !(repo.StartsWith("https://") || repo.StartsWith("git@") || Directory.Exists(repo)))
             {
                 MessageBox.Show(this, "Informe a URL do repositório no GitHub (ex.: https://github.com/usuario/repo.git).", Text,

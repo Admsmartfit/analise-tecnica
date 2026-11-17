@@ -46,7 +46,7 @@ if ($critical -and -not $Force) { exit 0 }
 # ---------------------------------------------------------------- 2. lock compartilhado com as rotinas Python
 $lockPath = Join-Path $Root "data\ts.lock"
 $fs = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite)
-try { $fs.Lock(0, 1) } catch { $fs.Close(); exit 0 }   # rotina em execução: tenta na próxima rodada
+try { $fs.Lock(0, 1) } catch { $fs.Close(); exit 4 }   # rotina em execução: tenta na próxima rodada
 
 try {
     # ------------------------------------------------------------ 3. há commit novo?
@@ -78,7 +78,14 @@ try {
     if ($depsChanged) {
         Log "Dependências mudaram: reinstalando"
         & $vpy -m pip install -e ".[dev]" --quiet 2>&1 | Out-File -FilePath $log -Append -Encoding utf8
-        if ($LASTEXITCODE -ne 0) { throw "pip install falhou" }
+        if ($LASTEXITCODE -ne 0) {
+            # ex.: painel (Streamlit) aberto prendendo arquivos do .venv — volta à versão anterior
+            Log "pip install falhou em $msg — rollback para $($old.Substring(0,7))"
+            Invoke-Git @("reset", "--hard", $old) | Out-Null
+            & $vpy -m pip install -e ".[dev]" --quiet 2>&1 | Out-File -FilePath $log -Append -Encoding utf8
+            Notify "❌ UPDATE: falha ao instalar dependências de $msg (feche o painel e tente de novo). Mantida a versão anterior."
+            exit 3
+        }
     }
 
     # ------------------------------------------------------------ 6. testes + rollback

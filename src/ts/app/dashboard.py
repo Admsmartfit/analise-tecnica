@@ -90,6 +90,42 @@ def _load_last_runs(db_path: str, limit: int = 20) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
+def _render_updates() -> None:
+    """Sidebar: installed vs available version and an 'update now' button."""
+    from ts.app.version import check_version, run_update
+
+    st.sidebar.divider()
+    st.sidebar.subheader("Atualizações")
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_check() -> dict:
+        v = check_version()
+        return {"installed": v.installed, "date": v.installed_date, "available": v.available,
+                "pending": v.pending, "error": v.error, "update": v.update_available}
+
+    if st.sidebar.button("Verificar agora"):
+        _cached_check.clear()
+    info = _cached_check()
+    if info["error"]:
+        st.sidebar.warning(f"Não foi possível verificar: {info['error']}")
+        return
+    st.sidebar.caption(f"Instalada: `{(info['installed'] or '')[:7]}` ({info['date']})")
+    if not info["update"]:
+        st.sidebar.success("Você está na última versão.")
+        return
+    st.sidebar.info(f"Nova versão disponível: `{(info['available'] or '')[:7]}`")
+    for line in info["pending"][:10]:
+        st.sidebar.markdown(f"- {line}")
+    if st.sidebar.button("⬇️ Atualizar agora", type="primary"):
+        with st.spinner("Atualizando e rodando os testes (1–3 min)..."):
+            code, msg = run_update()
+        _cached_check.clear()
+        if code == 0:
+            st.sidebar.success(msg + " Recarregue a página (F5).")
+        else:
+            st.sidebar.error(msg)
+
+
 def main() -> None:
     if not HAS_STREAMLIT:
         print("Streamlit is not installed. Run: pip install streamlit plotly")
@@ -115,6 +151,8 @@ def main() -> None:
 
     if st.sidebar.button("🔄 Refresh"):
         st.rerun()
+
+    _render_updates()
 
     # Row 1 — KPI cards
     col1, col2, col3, col4 = st.columns(4)

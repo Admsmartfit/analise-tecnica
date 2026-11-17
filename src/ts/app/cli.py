@@ -224,6 +224,43 @@ def corp_actions_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def universe_update_command(args: argparse.Namespace) -> int:
+    """Download the current IBX-100 portfolio from B3 into config/universe/ibx100_<quarter>.csv."""
+    from ts.data.universe import update_universe_file
+
+    d = date.fromisoformat(args.asof) if args.asof else date.today()
+    path = update_universe_file(d, overwrite=True)
+    console.print(f"Universo gravado: {path}  ({len(universe_on(d))} ativos)")
+    return 0
+
+
+def version_command(args: argparse.Namespace) -> int:
+    from ts.app.version import check_version
+
+    v = check_version()
+    if v.error:
+        console.print(f"[red]Não foi possível verificar a versão: {v.error}[/red]")
+        return 3
+    console.print(f"Instalada: {(v.installed or '')[:7]} ({v.installed_date})")
+    if v.update_available:
+        console.print(f"[yellow]Nova versão disponível: {(v.available or '')[:7]}[/yellow]")
+        for line in v.pending:
+            console.print(f"  - {line}")
+        console.print("Atualize com: python -m ts update")
+    else:
+        console.print("[green]Última versão instalada.[/green]")
+    return 0
+
+
+def update_command(args: argparse.Namespace) -> int:
+    from ts.app.version import run_update
+
+    console.print("Atualizando (git + testes; rollback automático se falhar)...")
+    code, msg = run_update()
+    console.print(msg)
+    return code
+
+
 def notify_command(args: argparse.Namespace) -> int:
     from ts.app.notify import send_telegram
 
@@ -395,6 +432,12 @@ def main() -> None:
     ca_p.add_argument("--tickers", type=str)
     ca_p.add_argument("--start", type=str, default="2019-01-01")
 
+    uu_p = subparsers.add_parser("universe-update", help="Baixa a carteira atual do IBX-100 da B3")
+    uu_p.add_argument("--asof", type=str)
+
+    subparsers.add_parser("version", help="Mostra a versão instalada e se há atualização")
+    subparsers.add_parser("update", help="Atualiza agora a partir do GitHub (com testes e rollback)")
+
     nt_p = subparsers.add_parser("notify", help="Send a Telegram message (used by the updater)")
     nt_p.add_argument("message", type=str)
 
@@ -402,6 +445,12 @@ def main() -> None:
 
     if args.command == "corp-actions":
         sys.exit(corp_actions_command(args))
+    if args.command == "universe-update":
+        sys.exit(universe_update_command(args))
+    if args.command == "version":
+        sys.exit(version_command(args))
+    if args.command == "update":
+        sys.exit(update_command(args))
     if args.command == "notify":
         sys.exit(notify_command(args))
     if args.command == "backtest":

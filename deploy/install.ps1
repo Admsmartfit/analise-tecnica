@@ -18,7 +18,7 @@
   powershell -ExecutionPolicy Bypass -File install.ps1 -RepoUrl https://github.com/SEU_USUARIO/trading-b3.git -Provider yahoo
 #>
 param(
-    [Parameter(Mandatory = $true)][string]$RepoUrl,
+    [string]$RepoUrl = "https://github.com/Admsmartfit/analise-tecnica.git",
     [string]$Root = "C:\TradingSystem",
     [string]$Branch = "main",
     [ValidateSet("yahoo", "mt5")][string]$Provider = "yahoo",
@@ -27,7 +27,8 @@ param(
     [string]$Mt5Server = "",
     [string]$TelegramChatId = "",
     [switch]$NoTasks,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$SkipInitialSync
 )
 
 $ErrorActionPreference = "Stop"
@@ -172,6 +173,33 @@ Step "Diagnóstico"
 if (-not $NoTasks) {
     Step "Tarefas do Agendador (incluindo auto-update a cada $UpdateEveryMinutes min)"
     & (Join-Path $Root "deploy\scripts\register_tasks.ps1") -Root $Root -Branch $Branch -UpdateEveryMinutes $UpdateEveryMinutes
+}
+
+# ---------------------------------------------------------------- 8. Atalhos (Área de Trabalho e Menu Iniciar)
+Step "Atalhos 'Trading System B3'"
+$shell = New-Object -ComObject WScript.Shell
+$targets = @(
+    [Environment]::GetFolderPath("Desktop"),
+    (Join-Path ([Environment]::GetFolderPath("StartMenu")) "Programs")
+)
+foreach ($dir in $targets) {
+    $lnk = $shell.CreateShortcut((Join-Path $dir "Trading System B3.lnk"))
+    $lnk.TargetPath = "powershell.exe"
+    $lnk.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Root\deploy\scripts\open_dashboard.ps1`" -Root `"$Root`""
+    $lnk.WorkingDirectory = $Root
+    $lnk.IconLocation = "$env:SystemRoot\System32\imageres.dll,144"
+    $lnk.Description = "Painel do Trading System B3 (posições, curva, atualizações)"
+    $lnk.WindowStyle = 7
+    $lnk.Save()
+    Write-Host "Atalho criado em $dir"
+}
+
+# ---------------------------------------------------------------- 9. Primeira carga de dados (Yahoo)
+if ($Provider -eq "yahoo" -and -not $SkipInitialSync) {
+    Step "Primeira carga de cotações desde 2019 (Yahoo, ~2 min)"
+    & $vpy -m ts universe-update
+    & $vpy -m ts sync --full
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Sync inicial terminou com código $LASTEXITCODE (o EOD tenta de novo às 19:30)." }
 }
 
 Step "Pronto"

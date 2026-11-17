@@ -22,6 +22,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-unt
     tickers = sorted(bars)
     monkeypatch.setattr(routines, "universe_on", lambda d: tickers)
     monkeypatch.setattr(sync_mod, "universe_on", lambda d: tickers)
+    monkeypatch.setattr(routines, "update_universe_file", lambda d: None)  # no network in tests
     s = Settings()
     s.system.data_dir = str(tmp_path / "data")
     s.system.db_path = str(tmp_path / "data" / "db" / "t.db")

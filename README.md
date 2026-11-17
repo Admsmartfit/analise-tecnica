@@ -5,6 +5,13 @@ execução no leilão de abertura, mesmo código em backtest, paper e real.
 
 ## Instalação no Windows
 
+**Para instalar em qualquer Windows 10/11 64-bit:** envie só o arquivo `TradingSystemB3-Setup.exe`. A pessoa abre e
+clica em **Instalar / Atualizar**: a URL do repositório (público) já vem embutida, Git e Python são instalados se
+faltarem, as cotações são carregadas e um atalho **Trading System B3** é criado na Área de Trabalho e no Menu Iniciar.
+O atalho abre o painel; na barra lateral, **Atualizações** mostra a versão instalada e o botão **Atualizar agora**
+(também `python -m ts version` / `python -m ts update`). A atualização roda os testes e volta sozinha à versão anterior
+se algo falhar.
+
 **Instalador gráfico:** execute `TradingSystemB3-Setup.exe` (baixe em GitHub > Actions > Artifacts, ou gere
 localmente com `powershell -ExecutionPolicy Bypass -File deploy\installer\build_installer.ps1`). Informe a URL do
 repositório, escolha a fonte de dados e clique em **Instalar / Atualizar**. Não precisa de administrador. O EXE não

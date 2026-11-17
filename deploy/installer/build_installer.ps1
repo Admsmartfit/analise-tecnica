@@ -3,7 +3,7 @@
   Gera dist\TradingSystemB3-Setup.exe usando o compilador C# do .NET Framework 4.x (já vem no Windows 10/11).
   Nada para instalar. Uso:  powershell -ExecutionPolicy Bypass -File deploy\installer\build_installer.ps1
 #>
-param([string]$Out = "")
+param([string]$Out = "", [string]$RepoUrl = "")
 
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
@@ -23,6 +23,15 @@ foreach ($name in "install.ps1", "uninstall.ps1") {
     [IO.File]::WriteAllText((Join-Path $obj $name), $text, $bom)
 }
 
+# URL padrão embutida no EXE (remote origin deste clone), para instalar com um clique.
+if (-not $RepoUrl) {
+    $RepoUrl = (& git -C $repo remote get-url origin 2>$null)
+    if (-not $RepoUrl) { $RepoUrl = "https://github.com/Admsmartfit/analise-tecnica.git" }
+}
+$commit = (& git -C $repo rev-parse --short HEAD 2>$null); if (-not $commit) { $commit = "dev" }
+$buildInfo = Join-Path $obj "BuildInfo.cs"
+[IO.File]::WriteAllText($buildInfo, "namespace TradingSystemSetup { static class BuildInfo { public const string DefaultRepo = @`"$($RepoUrl.Trim())`"; public const string Commit = `"$commit`"; } }", $bom)
+
 $cscArgs = @(
     "/nologo", "/target:winexe", "/optimize+", "/platform:anycpu",
     "/out:$Out",
@@ -30,7 +39,7 @@ $cscArgs = @(
     "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll",
     "/resource:$(Join-Path $obj 'install.ps1'),install.ps1",
     "/resource:$(Join-Path $obj 'uninstall.ps1'),uninstall.ps1",
-    (Join-Path $here "Setup.cs")
+    (Join-Path $here "Setup.cs"), $buildInfo
 )
 & $csc @cscArgs
 if ($LASTEXITCODE -ne 0) { throw "Compilação falhou ($LASTEXITCODE)" }

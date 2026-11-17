@@ -34,7 +34,7 @@ from ts.data.loader import load_signal_bars
 from ts.data.mt5_gateway import MT5Gateway
 from ts.data.ohlcv_store import OhlcvStore
 from ts.data.sync import sync_universe
-from ts.data.universe import universe_on
+from ts.data.universe import universe_on, update_universe_file
 from ts.data.yahoo_gateway import make_gateway
 from ts.execution.reconcile import reconcile_positions
 from ts.execution.session_engine import BookState, SessionEngine
@@ -155,6 +155,15 @@ def _eod_locked(
         return 0
 
     sync_info = ""
+    # Universe of the current quarter: fetched from the official B3 portfolio when the file is missing.
+    # Best effort — on failure the most recent composition on disk is used (and we alert).
+    try:
+        new_file = update_universe_file(today)
+        if new_file is not None:
+            notify(f"ℹ️ Universo atualizado pela carteira oficial da B3: {new_file.name} (versione no git)")
+    except Exception as e:  # noqa: BLE001
+        notify(f"⚠️ EOD {today}: não foi possível baixar a carteira do IBX-100 da B3 ({e}); usando o último arquivo")
+
     if do_sync:
         rep = sync_universe(asof=today, gateway=gateway, calendar=cal, settings=settings, db=db)
         sync_info = f"{len(rep.successful_tickers)}/{rep.total_tickers} sync"
