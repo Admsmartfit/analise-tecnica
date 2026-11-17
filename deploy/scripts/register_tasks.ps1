@@ -25,6 +25,9 @@ foreach ($t in $tasks) {
     $xml = (Get-Content $xmlPath -Raw -Encoding UTF8)
     $xml = $xml.Replace("__ROOT__", $Root).Replace("__USER__", $User)
     $xml = $xml.Replace("__BRANCH__", $Branch).Replace("__INTERVAL__", [string]$UpdateEveryMinutes)
+    # -Xml recebe uma string .NET (UTF-16); a declaração encoding="UTF-8" do arquivo causa
+    # "não é possível alternar codificação" (HRESULT 0x8004131a). Remove a declaração.
+    $xml = $xml -replace '^﻿?\s*<\?xml[^>]*\?>\s*', ''
     Write-Host "Registering $t ..." -ForegroundColor Cyan
     Register-ScheduledTask -TaskName $t -Xml $xml -Force | Out-Null
 }

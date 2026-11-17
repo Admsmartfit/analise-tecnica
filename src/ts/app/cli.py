@@ -79,11 +79,17 @@ def doctor_command(args: argparse.Namespace) -> int:
             health = gateway.health()
             if health.ok and (health.trade_allowed or settings.execution.mode == "paper"):
                 conn_status = "[green]PASS[/green]"
+                age = f"{health.tick_age_seconds:.0f}s" if health.tick_age_seconds is not None else "n/d"
                 detail_str = (
                     f"Terminal: {health.terminal_version} | Connected: {health.connected} | "
-                    f"AlgoTrading: {health.trade_allowed} | tick age {settings.mt5.heartbeat_symbol}: {health.tick_age_seconds}s | "
-                    f"ping servidor: {health.details.get('server_ping_ms')} ms ({health.details.get('company')})"
+                    f"AlgoTrading: {health.trade_allowed} | idade da cotação: {age}"
                 )
+                if settings.data.provider == "mt5":
+                    detail_str += (
+                        f" | ping servidor: {health.details.get('server_ping_ms')} ms ({health.details.get('company')})"
+                    )
+                else:
+                    detail_str += " (Yahoo tem ~15 min de atraso; irrelevante para decisão D1)"
             else:
                 conn_status = "[yellow]WARN[/yellow]"
                 detail_str = f"Terminal reachable but status not fully OK: {health.details}"
