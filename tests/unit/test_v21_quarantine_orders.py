@@ -142,6 +142,24 @@ def test_gap_above_risk_cap_does_not_fill_and_partial_waits_a_day() -> None:
     assert not any(f.reason == "PARTIAL" for f in res2.fills)  # partial order only exists from the next pre-open
 
 
+def test_auction_open_below_stop_does_not_fill() -> None:
+    """Regression (lab GARCH, BRAV3 26/10/2026): a gap down through the stop used to fill with risk ~0 -> R of -3e7."""
+    bars, ibov, sessions = market(330)
+    cfg = StrategyConfig()
+    eng = _engine(cfg)
+    from ts.strategy.signal_engine import prepare_ticker
+
+    t = "AAAA3"
+    prepared = {t: prepare_ticker(t, bars[t], cfg)}
+    d = sessions[-5]
+    o = float(prepared[t].view._cols["raw_open"][prepared[t].index_of(d)])
+    st = BookState.new(100_000, cfg)
+    st.pending.append(PendingOrder("T3", None, t, "BUY", "OPEN_AUCTION", 100, o, o * 1.05, o * 1.01, None, "A",
+                                   "TREND", d, risk_budget=1_000.0, max_fill_price=o * 1.05))
+    res = eng.run_session(st, d, prepared, market_ok=False)
+    assert not res.fills and t not in st.positions and "abaixo do stop" in res.expired[0][1]
+
+
 def test_preopen_package_bracket() -> None:
     cfg = StrategyConfig()
     eng = _engine(cfg)

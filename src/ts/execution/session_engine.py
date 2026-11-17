@@ -386,6 +386,12 @@ class SessionEngine:
                     res.expired.append((o, f"abertura {b['open']:.2f} acima do preço máximo {o.limit_price:.2f} "
                                            "(proteção do leilão / teto de risco)"))
                     continue
+                if b["open"] * (1.0 + slip) <= o.stop_price:
+                    # Gap down through the technical stop: the setup is invalid before entering (a buy with SL above
+                    # the price is rejected by the broker). Filling here produced risk ~0 and absurd R multiples.
+                    res.expired.append((o, f"abertura {b['open']:.2f} no/abaixo do stop {o.stop_price:.2f} "
+                                           "(setup invalidado pelo gap)"))
+                    continue
                 fill = b["open"] * (1.0 + slip)
             elif o.kind == "BUY_STOP":
                 if b["high"] >= o.entry_ref:
