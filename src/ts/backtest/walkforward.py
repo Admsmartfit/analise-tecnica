@@ -113,6 +113,7 @@ class WalkForwardResult:
     selections: list[dict[str, Any]]
     grid_returns: pd.DataFrame
     grid_results: list[BacktestResult]
+    oos_open_positions: pd.Series | None = None
 
 
 @dataclass
@@ -160,6 +161,7 @@ class WalkForwardEngine:
         dates = list(rets.index)
         oos_trades: list[CompletedTrade] = []
         oos_parts: list[pd.Series] = []
+        pos_parts: list[pd.Series] = []
         selections: list[dict[str, Any]] = []
         start = train_sessions
         while start < len(dates):
@@ -174,9 +176,13 @@ class WalkForwardEngine:
                                "is_expectancy": float(scores[best])})
             oos_trades += [t for t in results[best].trades if oos_from <= t.entry_date <= oos_to]
             oos_parts.append(rets[best].loc[oos_from:oos_to])
+            ec = results[best].equity_curve
+            if "open_positions" in ec.columns:
+                pos_parts.append(ec.set_index("session_date")["open_positions"].loc[oos_from:oos_to])
             start += test_sessions
         oos = pd.concat(oos_parts) if oos_parts else pd.Series(dtype=float)
-        return WalkForwardResult(oos_trades, oos, selections, rets, results)
+        pos = pd.concat(pos_parts) if pos_parts else None
+        return WalkForwardResult(oos_trades, oos, selections, rets, results, pos)
 
     def run_sensitivity_plateau(
         self,
@@ -242,6 +248,8 @@ class WalkForwardEngine:
         eq_df = pd.DataFrame({"session_date": list(oos_eq.index), "equity": oos_eq.to_numpy()})
         if not eq_df.empty:
             eq_df["drawdown_pct"] = (eq_df["equity"].cummax() - eq_df["equity"]) / eq_df["equity"].cummax()
+            if wf.oos_open_positions is not None:  # exposure metric (was always 0% before)
+                eq_df["open_positions"] = wf.oos_open_positions.reindex(oos_eq.index).fillna(0).to_numpy()
         oos_result = BacktestResult(
             trades=wf.oos_trades, equity_curve=eq_df, config_hash="walk-forward-oos",
             initial_capital=self.initial_capital,
@@ -269,6 +277,10 @@ class WalkForwardEngine:
         checks = validate_gate_g0(metrics, plateau[0] if plateau else None, regimes[0] if regimes else None)
         approved = bool(checks["overall_g0_approved"])
 
+        total_net = sum(t.net_pnl_brl for t in result.trades)
+        conc = (f"{metrics.max_single_trade_profit_pct:.1%}" if total_net > 0
+                else "n/a — lucro total ≤ 0")
+
         def st(key: str) -> str:
             return "PASS" if checks[key] else "FAIL"
 
@@ -288,7 +300,7 @@ class WalkForwardEngine:
             f"| Limite inferior bootstrap 95% | > 0 | {metrics.bootstrap_ci_lower_r:+.3f}R | {st('bootstrap_ci_lower_positive')} |",
             f"| Deflated Sharpe Ratio | ≥ 0,95 | {metrics.deflated_sharpe_prob:.3f} | {st('dsr_passed')} |",
             f"| PBO (CSCV) | < 0,20 | {metrics.pbo:.3f} | {st('pbo_passed')} |",
-            f"| Maior operação / lucro líquido total | ≤ 20% | {metrics.max_single_trade_profit_pct:.1%} | {st('concentration_passed')} |",
+            f"| Maior operação / lucro líquido total | ≤ 20% | {conc} | {st('concentration_passed')} |",
             f"| Platô ±20% (esperança > 0 em todos) | todos > 0 | {'avaliado' if plateau else 'NÃO AVALIADO'} | {st('plateau_passed')} |",
             f"| Positivo em ≥ 2 de 3 regimes | 2/3 | {'avaliado' if regimes else 'NÃO AVALIADO'} | {st('regimes_passed')} |",
             "",
@@ -301,7 +313,9 @@ class WalkForwardEngine:
             f"- MAE médio: {metrics.avg_mae_r}R | MFE médio: {metrics.avg_mfe_r}R",
             f"- Drawdown máx.: {metrics.max_drawdown_pct:.1%} | Ulcer: {metrics.ulcer_index} | Calmar: {metrics.calmar_ratio} | Sharpe anual (só relatório): {metrics.sharpe_ratio}",
             f"- Custos / lucro bruto: {metrics.cost_over_gross_profit:.1%} (alvo < 25%) | Exposição: {metrics.exposure_pct:.1%}",
-            f"- Capital inicial: R$ {result.initial_capital:,.2f} | Final: R$ {result.final_equity:,.2f} | Lucro líquido: R$ {result.total_net_pnl:,.2f} | Custos: R$ {result.total_fees:,.2f}",
+            f"- Capital inicial: R$ {result.initial_capital:,.2f} | Patrimônio final da curva (retornos diários encadeados): R$ {result.final_equity:,.2f}",
+            f"- Soma do resultado líquido das operações: R$ {result.total_net_pnl:,.2f} | Custos: R$ {result.total_fees:,.2f} "
+            "(as duas medidas diferem quando há posições abertas na virada das janelas e pelo encadeamento dos retornos)",
         ]
         if metrics.by_setup:
             lines += ["", "### Por setup", "", "| Setup | Operações | E[R] | IC 95% | Acerto |", "| --- | --- | --- | --- | --- |"]

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trading System B3</title>
+  <meta name="ts-token" content="__TS_TOKEN__">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <header id="statusbar" role="banner" aria-label="Status do sistema">
+    <span class="brand">Trading System B3</span>
+    <span id="st-mode" class="pill" title="Modo de execução">…</span>
+    <span id="st-data" class="sb-item" title="Frescor dos dados">…</span>
+    <span id="st-eod" class="sb-item" title="Última rotina de fim de dia">…</span>
+    <span id="st-next" class="sb-item" title="Próxima rotina agendada">…</span>
+    <span id="st-conn" class="sb-item">…</span>
+    <span class="sb-spacer"></span>
+    <button id="st-update" class="badge hidden" type="button" title="Há uma versão nova">⟳ Atualização disponível</button>
+    <button id="btn-settings" class="icon-btn" type="button" title="Aparência" aria-label="Aparência">⚙</button>
+  </header>
+  <div id="cb-banner" class="banner hidden" role="alert"></div>
+
+  <main id="layout">
+    <section id="watch" class="panel" aria-label="Market Watch">
+      <div class="panel-head">
+        <h2>Market Watch</h2>
+        <button class="icon-btn collapse" data-collapse="watch" title="Recolher" aria-label="Recolher Market Watch">⟨</button>
+      </div>
+      <div class="watch-tools">
+        <input id="watch-filter" type="search" placeholder="Filtrar ativo…" aria-label="Filtrar ativo">
+        <div class="chips" role="group" aria-label="Filtros rápidos">
+          <button class="chip" data-filter="signal" type="button">Com sinal</button>
+          <button class="chip" data-filter="held" type="button">Em carteira</button>
+          <button class="chip" data-filter="up" type="button">Tendência de alta</button>
+          <button class="chip" data-filter="fav" type="button">★</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="watch-table" class="grid">
+          <thead><tr>
+            <th data-sort="fav" title="Favorito">★</th>
+            <th data-sort="ticker">Ativo</th>
+            <th data-sort="last" class="num">Último</th>
+            <th data-sort="change_pct" class="num">Var.</th>
+            <th data-sort="trend" title="Fechamento acima/abaixo da média de 200 dias">Tend.</th>
+            <th data-sort="atr_pct" class="num" title="ATR de 14 dias em % do preço">ATR%</th>
+            <th data-sort="signal" title="Sinal no último pregão processado">Sinal</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+    <div class="splitter v" data-resize="watch" role="separator" aria-orientation="vertical" tabindex="0" title="Arraste para redimensionar"></div>
+
+    <section id="center">
+      <section id="chart-panel" class="panel" aria-label="Gráfico">
+        <div class="panel-head">
+          <h2 id="chart-title">—</h2>
+          <span id="chart-sub" class="muted"></span>
+          <span class="sb-spacer"></span>
+          <div class="seg" id="period" role="group" aria-label="Período">
+            <button type="button" data-p="3M">3M</button><button type="button" data-p="6M">6M</button>
+            <button type="button" data-p="1A" class="on">1A</button><button type="button" data-p="2A">2A</button>
+            <button type="button" data-p="5A">5A</button><button type="button" data-p="TUDO">Tudo</button>
+          </div>
+          <div class="layers" id="layers" role="group" aria-label="Camadas">
+            <label><input type="checkbox" data-layer="sma200" checked> SMA 200</label>
+            <label><input type="checkbox" data-layer="sma50" checked> SMA 50</label>
+            <label><input type="checkbox" data-layer="ema20" checked> EMA 20</label>
+            <label><input type="checkbox" data-layer="volume" checked> Volume</label>
+            <label><input type="checkbox" data-layer="signals" checked> Sinais</label>
+          </div>
+        </div>
+        <div id="chart" aria-label="Gráfico de candles"></div>
+        <div id="chart-empty" class="empty hidden"></div>
+      </section>
+      <div class="splitter h" data-resize="terminal" role="separator" aria-orientation="horizontal" tabindex="0" title="Arraste para redimensionar"></div>
+      <section id="terminal" class="panel" aria-label="Terminal">
+        <div class="tabs" role="tablist">
+          <button role="tab" class="tab on" data-tab="positions" type="button">Posições <span class="count" id="c-positions">0</span></button>
+          <button role="tab" class="tab" data-tab="orders" type="button">Ordens p/ amanhã <span class="count" id="c-orders">0</span></button>
+          <button role="tab" class="tab" data-tab="signals" type="button">Sinais <span class="count" id="c-signals">0</span></button>
+          <button role="tab" class="tab" data-tab="runs" type="button">Diário</button>
+          <span class="sb-spacer"></span>
+          <button class="icon-btn collapse" data-collapse="terminal" title="Recolher" aria-label="Recolher terminal">⌄</button>
+        </div>
+        <div id="tab-body" class="table-wrap"></div>
+      </section>
+    </section>
+    <div class="splitter v" data-resize="inspector" role="separator" aria-orientation="vertical" tabindex="0" title="Arraste para redimensionar"></div>
+
+    <aside id="inspector" class="panel" aria-label="Raio-X">
+      <div class="panel-head">
+        <h2>Raio-X</h2>
+        <button class="icon-btn collapse" data-collapse="inspector" title="Recolher" aria-label="Recolher Raio-X">⟩</button>
+      </div>
+      <div id="inspector-body" class="inspector-body"></div>
+    </aside>
+  </main>
+
+  <dialog id="dlg-update" aria-labelledby="dlg-update-title">
+    <h3 id="dlg-update-title">Nova versão disponível</h3>
+    <p class="muted">A atualização baixa o código, roda os testes e volta sozinha à versão anterior se algo falhar.</p>
+    <ul id="dlg-update-list"></ul>
+    <div class="dlg-actions">
+      <button type="button" id="dlg-update-cancel">Agora não</button>
+      <button type="button" id="dlg-update-go" class="primary">Atualizar agora</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-settings" aria-labelledby="dlg-settings-title">
+    <h3 id="dlg-settings-title">Aparência</h3>
+    <label class="row">Tema
+      <select id="set-theme"><option value="dark">Escuro</option><option value="light">Claro</option></select></label>
+    <label class="row">Cores de alta/baixa
+      <select id="set-colors"><option value="classic">Verde / vermelho</option>
+        <option value="cvd">Azul / laranja (daltonismo)</option></select></label>
+    <label class="row">Densidade
+      <select id="set-density"><option value="comfortable">Confortável</option><option value="compact">Compacta</option></select></label>
+    <button type="button" id="set-reset-layout">Restaurar layout padrão</button>
+    <p class="credits">Gráficos: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a> (Apache 2.0).</p>
+    <div class="dlg-actions"><button type="button" id="dlg-settings-close" class="primary">Fechar</button></div>
+  </dialog>
+
+  <div id="toasts" aria-live="polite"></div>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

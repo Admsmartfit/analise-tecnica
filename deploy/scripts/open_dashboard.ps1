@@ -1,19 +1,27 @@
 ﻿<#
 .SYNOPSIS
-  Abre o painel do Trading System (atalho "Trading System B3"). Se o painel já estiver rodando,
-  só abre o navegador; senão inicia o Streamlit em segundo plano e abre quando estiver pronto.
+  Abre o terminal do Trading System (atalho "Trading System B3") numa janela de programa.
+  Se o terminal já estiver aberto, abre outra janela na mesma instância.
+  -Classic abre o painel antigo (Streamlit) no navegador.
 #>
-param([string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path, [int]$Port = 8501)
+param([string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path, [switch]$Classic)
 
-$url = "http://localhost:$Port"
-function Test-Port { try { $c = New-Object Net.Sockets.TcpClient; $c.Connect("127.0.0.1", $Port); $c.Close(); $true } catch { $false } }
+$pyw = Join-Path $Root ".venv\Scripts\pythonw.exe"
+if (-not (Test-Path $pyw)) { $pyw = Join-Path $Root ".venv\Scripts\python.exe" }
 
+if (-not $Classic) {
+    Start-Process -FilePath $pyw -WorkingDirectory $Root -ArgumentList @("-m", "ts", "ui")
+    exit 0
+}
+
+$port = 8501
+$url = "http://localhost:$port"
+function Test-Port { try { $c = New-Object Net.Sockets.TcpClient; $c.Connect("127.0.0.1", $port); $c.Close(); $true } catch { $false } }
 if (-not (Test-Port)) {
     $py = Join-Path $Root ".venv\Scripts\python.exe"
-    # headless: sem prompt de e-mail do Streamlit na primeira execução (travaria com a janela oculta)
     Start-Process -FilePath $py -WorkingDirectory $Root -WindowStyle Hidden -ArgumentList @(
         "-m", "streamlit", "run", "src\ts\app\dashboard.py",
-        "--server.headless", "true", "--server.port", "$Port", "--browser.gatherUsageStats", "false"
+        "--server.headless", "true", "--server.port", "$port", "--browser.gatherUsageStats", "false"
     )
     for ($i = 0; $i -lt 60 -and -not (Test-Port); $i++) { Start-Sleep -Milliseconds 500 }
 }

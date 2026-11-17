@@ -18,6 +18,9 @@ dependencies = [
     "keyring>=24.0.0",
     "httpx>=0.27.0",
     "rich>=13.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "pywebview>=5.3; sys_platform == 'win32'",
     "MetaTrader5; sys_platform == 'win32'"
 ]
 
@@ -34,6 +37,10 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"ts.app" = ["web/*", "web/vendor/*"]
+"ts.persistence" = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

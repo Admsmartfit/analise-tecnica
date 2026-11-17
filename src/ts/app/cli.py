@@ -261,6 +261,13 @@ def update_command(args: argparse.Namespace) -> int:
     return code
 
 
+def ui_command(args: argparse.Namespace) -> int:
+    """Open the visual terminal (local API + desktop window)."""
+    from ts.app.desktop import run_ui
+
+    return run_ui(port=args.port, window=not args.browser)
+
+
 def notify_command(args: argparse.Namespace) -> int:
     from ts.app.notify import send_telegram
 
@@ -438,6 +445,10 @@ def main() -> None:
     subparsers.add_parser("version", help="Mostra a versão instalada e se há atualização")
     subparsers.add_parser("update", help="Atualiza agora a partir do GitHub (com testes e rollback)")
 
+    ui_p = subparsers.add_parser("ui", help="Abre o terminal visual (janela desktop)")
+    ui_p.add_argument("--port", type=int, default=8765)
+    ui_p.add_argument("--browser", action="store_true", help="Abrir no navegador em vez da janela")
+
     nt_p = subparsers.add_parser("notify", help="Send a Telegram message (used by the updater)")
     nt_p.add_argument("message", type=str)
 
@@ -451,6 +462,8 @@ def main() -> None:
         sys.exit(version_command(args))
     if args.command == "update":
         sys.exit(update_command(args))
+    if args.command == "ui":
+        sys.exit(ui_command(args))
     if args.command == "notify":
         sys.exit(notify_command(args))
     if args.command == "backtest":

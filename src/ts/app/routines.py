@@ -79,11 +79,31 @@ def _lock(settings: Settings, timeout_s: float = 600.0) -> ProcessLock:
     return ProcessLock(settings.system.lock_path, timeout_s=timeout_s)
 
 
-def _load_reference_r(settings: Settings) -> dict[str, list[float]] | None:
+def _load_reference_r(settings: Settings, config_hash: str | None = None) -> dict[str, list[float]] | None:
+    """Backtest R distribution per setup (written by `ts backtest`) for the live setup monitor.
+
+    Only used when it was produced with the same strategy configuration; a broken or foreign file never
+    stops the EOD (the monitor falls back to its no-reference rule).
+    """
     p = Path(settings.system.data_dir) / "reference" / "setup_r.json"
-    if p.exists():
-        return {k: [float(x) for x in v] for k, v in json.loads(p.read_text(encoding="utf-8")).items()}
-    return None
+    if not p.exists():
+        return None
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        logger.warning("Ignoring unreadable %s: %s", p, e)
+        return None
+    if config_hash and raw.get("config_hash") not in (None, config_hash):
+        logger.info("Ignoring %s: produced with config %s (current %s)", p, raw.get("config_hash"), config_hash)
+        return None
+    out: dict[str, list[float]] = {}
+    for k, v in raw.items():
+        if isinstance(v, list):
+            try:
+                out[k] = [float(x) for x in v]
+            except (TypeError, ValueError):
+                logger.warning("Ignoring non-numeric reference for setup %s", k)
+    return out or None
 
 
 # --------------------------------------------------------------------------------------------- EOD
@@ -182,7 +202,7 @@ def _eod_locked(
     corp = CorporateActionsStore(settings.system.corporate_actions_path)
     engine = SessionEngine(cfg, costs, config_hash, cal, settings.execution.fractional_shares,
                            settings.execution.client_id_prefix)
-    reference_r = _load_reference_r(settings)
+    reference_r = _load_reference_r(settings, config_hash)
     state = repo.load_state(cfg, settings.execution.reference_capital, cal, before=sessions[0], reference_r=reference_r)
 
     summary: list[str] = []
