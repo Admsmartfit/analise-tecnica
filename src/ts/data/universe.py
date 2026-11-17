@@ -16,6 +16,7 @@ import pandas as pd
 
 logger = logging.getLogger("ts.data.universe")
 
+_WARNED: set[str] = set()
 _FILE_RE = re.compile(r"ibx100_(\d{4})_Q([1-4])\.csv$", re.IGNORECASE)
 
 
@@ -105,10 +106,12 @@ def universe_on(d: date, universe_dir: str | Path | None = None) -> list[str]:
         target_file = eligible[-1]
     else:
         target_file = dated[0][1]
-        logger.warning(
-            "No universe composition on or before %s; using earliest file %s (survivorship risk in backtest)",
-            d, target_file.name,
-        )
+        if target_file.name not in _WARNED:  # once per run: a backtest calls this for every session
+            _WARNED.add(target_file.name)
+            logger.warning(
+                "No universe composition on or before %s; using earliest file %s for earlier dates "
+                "(survivorship risk in backtest)", d, target_file.name,
+            )
 
     df = pd.read_csv(target_file)
     return sorted({str(t).strip().upper() for t in df["ticker"].dropna().tolist()})
