@@ -85,6 +85,25 @@ A primeira versão do teste "gap > 1 desvio, contra o gap" mostrou **+0,256% lí
 - **Contra o gap com stop intradiário e saída antes do fechamento** (ex.: alvo no fechamento do dia anterior). O efeito bruto existe; uma saída melhor poderia aumentar a margem sobre o custo. Com 21 regras já testadas, uma nova versão precisaria de t > 3 para ser levada a sério.
 - **Leilões e microestrutura** (book, agressão, VWAP). Exigem dados tick a tick, que só o MT5 ou feeds pagos fornecem.
 
+## 6b. Adendo — as mesmas regras separadas por regime do IBOV
+
+Separando por regime (ALTA, LATERAL, BAIXA; regime conhecido antes da abertura), uma regra pareceu forte:
+**comprar na abertura quando a ação abre com gap de baixa > 2% e o IBOV está em BAIXA**, zerando no fechamento.
+
+| Gap mínimo (só regime BAIXA) | Operações | Líquido/op. | Acerto | Dias distintos | t contando 1 resultado por dia |
+| --- | --- | --- | --- | --- | --- |
+| 1,5% | 2.085 | +0,62% | 56% | 219 | +1,4 |
+| 2% | 1.328 | +0,70% | 57% | 165 | +0,9 |
+| 3% | 597 | +1,04% | 61% | 104 | +1,3 |
+| 4% | 263 | +1,24% | 63% | 62 | +1,5 |
+
+Contando cada operação como independente o t passava de 5, mas isso é enganoso: nos dias de pânico dezenas de
+ações abrem em gap juntas (75 num único dia de 2020) e se recuperam juntas. Contando um resultado por dia, o t fica
+entre 1 e 1,5 — indistinguível de sorte. 2020 sozinho tem 45% das operações; 2021 e 2023 foram negativos; a pior
+operação perdeu 14,7% num dia. Um stop de 1 ou 2 ATR não mudou o quadro. **Conclusão mantida: não implementar
+day trade.** (O setup F de swing, com a mesma ideia de comprar quedas em mercado de baixa, passou nesse teste:
+t = 3,3 contando por dia.)
+
 ## 7. Recomendação
 
 1. **Não construir um módulo de day trade em ações agora.** Nenhuma regra passou num critério equivalente ao G0 do swing.

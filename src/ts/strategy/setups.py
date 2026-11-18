@@ -315,11 +315,34 @@ def evaluate_setup_f(
     )
 
 
+# --------------------------------------------------------------------------------------------------
+# Setup G — Força mensal + virada do MACD diário (lab multi-tempo 2026-11-17, "M2")
+# --------------------------------------------------------------------------------------------------
+def evaluate_setup_g(
+    ticker: str, asof: date, data: Any, pivots: Sequence[PivotEvent], cfg: StrategyConfig, config_hash: str
+) -> Signal | None:
+    sg = cfg.setups.G
+    fv = ensure_view(data, cfg)
+    if not sg.enabled or fv.n_bars < 60:
+        return None
+    rm, h_t, h_p = fv.v("rsi_month"), fv.v("macd_hist"), fv.v("macd_hist", -1)
+    if _nan(rm) or rm < sg.rsi_month_min or _nan(h_t) or _nan(h_p) or not (h_t > 0 >= h_p):
+        return None
+    c_t, a = fv.v("close"), fv.v("atr14")
+    if _nan(a) or a <= 0 or c_t - sg.stop_atr_k * a <= 0:
+        return None
+    return _make_signal(
+        fv, SetupId.G_MONTHLY_MACD, TradeClass.TREND, ticker, asof, "OPEN_AUCTION", c_t, c_t - sg.stop_atr_k * a,
+        None, {"rsi_month": rm, "macd_hist": h_t}, cfg, config_hash,
+    )
+
+
 SETUP_EVALUATORS = (
     evaluate_setup_a,
     evaluate_setup_b,
     evaluate_setup_c,
     evaluate_setup_d,
     evaluate_setup_e,
+    evaluate_setup_g,  # skipped here when G.all_regimes (then evaluated in every regime by the signal engine)
 )
 BEAR_EVALUATORS = (evaluate_setup_f,)  # only when the IBOV is in a bear regime (no asset-trend filter)

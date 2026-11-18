@@ -21,7 +21,7 @@ from ts.strategy.setups import SETUP_EVALUATORS
 from ts.strategy.signal_engine import prepare_ticker
 
 SETUP_NAMES = {"A": "Pivô de alta", "B": "Pullback", "C": "Donchian 20/10", "D": "Bollinger squeeze", "E": "Divergência",
-               "F": "Reversão na baixa"}
+               "F": "Reversão na baixa", "G": "Força mensal + MACD"}
 
 
 def _f(x: float) -> float | None:
@@ -142,7 +142,7 @@ def build_checklist(ticker: str, bars: pd.DataFrame, ibov: pd.DataFrame, cfg: St
         ]
         conds += _router(cfg, "B", phase, er)
         setups.append({"id": "B", "name": SETUP_NAMES["B"], "enabled": True, "conditions": conds})
-    for sid, sc in (("C", s.C), ("D", s.D), ("E", s.E), ("F", s.F)):
+    for sid, sc in (("C", s.C), ("D", s.D), ("E", s.E), ("F", s.F), ("G", s.G)):
         setups.append({"id": sid, "name": SETUP_NAMES[sid], "enabled": bool(sc.enabled), "conditions": []})
 
     # Ground truth: what the signal engine itself says for this bar (the checklist only explains it).

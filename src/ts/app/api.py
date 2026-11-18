@@ -46,7 +46,7 @@ DISPOSITION_PT = {
     "REJECTED_SIZE": "Stop/tamanho inválido", "REJECTED_RR": "Retorno/risco abaixo de 3", "REJECTED_DUPLICATE": "Já posicionado",
 }
 SETUP_PT = {"A": "Pivô de alta", "B": "Pullback", "C": "Donchian 20/10", "D": "Bollinger squeeze", "E": "Divergência",
-            "F": "Reversão na baixa"}
+            "F": "Reversão na baixa", "G": "Força mensal + MACD"}
 STATE_PT = {"PLANNED": "Planejada", "SUBMITTED": "Enviada", "ACCEPTED": "Aceita", "PARTIALLY_FILLED": "Parcial",
             "FILLED": "Executada", "CANCELLED": "Cancelada", "EXPIRED": "Expirada", "REJECTED": "Rejeitada",
             "UNKNOWN": "Desconhecida"}

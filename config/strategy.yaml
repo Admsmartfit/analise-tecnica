@@ -103,6 +103,22 @@ setups:
     stop_atr_k: 2.8
     entry_type: "OPEN_AUCTION"
 
+  # Força de longo prazo + virada no diário (lab multi-tempo 2026-11-17, ideia do trader):
+  # IFR(14) MENSAL (só meses encerrados) >= 60 e o histograma do MACD(12,26,9) diário cruza acima de zero.
+  # Opera em qualquer regime do IBOV (o IFR mensal é o filtro de tendência). Stop 2,8 ATR; Chandelier 3 ATR(22)
+  # desde a entrada. Motor completo 2019-26 (A+B+F+G): 520 op., E[R] +0,088 (IC +0,01..+0,17), +27,6%, DD 15,4%;
+  # prova 2024+ +6,6% (vs +3,0% sem G). Platô 50/60/70 positivo. PAPER experimental: DSR 0,70 < 0,95 (G0 ainda reprova).
+  G:
+    name: "Mensal_Forte_MACD"
+    trade_class: "TREND"
+    enabled: true
+    rsi_month_period: 14
+    rsi_month_min: 60.0
+    stop_atr_k: 2.8
+    trailing_chandelier_k: 3.0
+    all_regimes: true
+    entry_type: "OPEN_AUCTION"
+
 risk:
   risk_per_trade_pct: 0.01
   stop_atr_min_k: 1.0

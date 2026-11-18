@@ -72,6 +72,13 @@ def compute_features(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
     sf = cfg.setups.F
     f["rsi_f"] = rsi(c, sf.rsi_period)
     f["sma_f"] = sma(c, sf.exit_sma)
+    # Monthly RSI from COMPLETED months only: on any day of month m the value is the RSI computed through m-1.
+    # (The in-progress month never enters, so a truncated series gives the same value -> prefix/parity safe.)
+    month = pd.PeriodIndex(pd.to_datetime(f["session_date"]), freq="M")
+    m_close = c.groupby(month).last()
+    m_rsi = rsi(m_close.reset_index(drop=True), cfg.setups.G.rsi_month_period)
+    m_rsi.index = m_close.index
+    f["rsi_month"] = pd.Series(month, index=f.index).map(m_rsi.shift(1)).astype(float)
     return f
 
 

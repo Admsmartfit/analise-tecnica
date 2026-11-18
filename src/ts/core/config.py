@@ -193,6 +193,21 @@ class SetupFConfig(BaseModel):
     entry_type: Literal["OPEN_AUCTION"] = "OPEN_AUCTION"
 
 
+class SetupGConfig(BaseModel):
+    """Força de longo prazo + virada no diário: IFR(14) MENSAL (só meses encerrados) >= rsi_month_min e o
+    histograma do MACD diário cruza acima de zero. Saída: stop móvel Chandelier ativo desde a entrada."""
+
+    name: str = "Mensal_Forte_MACD"
+    trade_class: Literal["TREND"] = "TREND"
+    enabled: bool = False
+    rsi_month_period: int = 14
+    rsi_month_min: float = 60.0
+    stop_atr_k: float = 2.8
+    trailing_chandelier_k: float = 3.0
+    all_regimes: bool = False  # True = opera em qualquer regime do IBOV, sem o filtro de tendência do ativo
+    entry_type: Literal["OPEN_AUCTION"] = "OPEN_AUCTION"
+
+
 class SetupsContainer(BaseModel):
     A: SetupAConfig = Field(default_factory=SetupAConfig)
     B: SetupBConfig = Field(default_factory=SetupBConfig)
@@ -200,6 +215,7 @@ class SetupsContainer(BaseModel):
     D: SetupDConfig = Field(default_factory=SetupDConfig)
     E: SetupEConfig = Field(default_factory=SetupEConfig)
     F: SetupFConfig = Field(default_factory=SetupFConfig)
+    G: SetupGConfig = Field(default_factory=SetupGConfig)
 
 
 class RiskConfig(BaseModel):

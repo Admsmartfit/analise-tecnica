@@ -22,7 +22,7 @@ from ts.core.models import Signal
 from ts.indicators.pivots import PivotHistory, detect_pivot_events
 from ts.strategy.features import FeatureView, compute_features
 from ts.strategy.regime import is_market_bearish, is_market_filter_bullish
-from ts.strategy.setups import BEAR_EVALUATORS, SETUP_EVALUATORS
+from ts.strategy.setups import BEAR_EVALUATORS, SETUP_EVALUATORS, evaluate_setup_g
 
 logger = logging.getLogger("ts.strategy.signal_engine")
 
@@ -103,14 +103,16 @@ class SignalEngine:
             market_ok = (not self.config.market_filter.require_bull_regime) or is_market_filter_bullish(
                 index_bars, self.config.market_filter
             )
+        g_any = self.config.setups.G.enabled and self.config.setups.G.all_regimes
+        anywhere = self._evaluate_any_regime(asof, prepared) if g_any else []
         if not market_ok:
             if not self.config.setups.F.enabled:
-                logger.debug("Market filter (IBOV) not bullish on %s — no signals", asof)
-                return []
+                logger.debug("Market filter (IBOV) not bullish on %s — no trend signals", asof)
+                return anywhere
             if market_bear is None:
                 _check_lookahead("index_bars", index_bars, asof)
                 market_bear = is_market_bearish(index_bars, self.config.market_filter)
-            return self._evaluate_bear(asof, prepared) if market_bear else []
+            return (self._evaluate_bear(asof, prepared) if market_bear else []) + anywhere
 
         signals: list[Signal] = []
         for ticker, td in prepared.items():
@@ -126,9 +128,23 @@ class SignalEngine:
                 continue
             pivots = td.pivots.asof(asof)
             for evaluator in SETUP_EVALUATORS:
+                if g_any and evaluator is evaluate_setup_g:
+                    continue
                 sig = evaluator(ticker, asof, fv, pivots, self.config, self.config_hash)
                 if sig is not None:
                     signals.append(sig)
+        return signals + anywhere
+
+    def _evaluate_any_regime(self, asof: date, prepared: Mapping[str, TickerData]) -> list[Signal]:
+        """Setup G with ``all_regimes``: no market or asset-trend filter (its monthly RSI is the trend filter)."""
+        signals: list[Signal] = []
+        for ticker, td in prepared.items():
+            k = td.index_of(asof)
+            if k is None or k + 1 < self.config.min_history_bars:
+                continue
+            sig = evaluate_setup_g(ticker, asof, td.view.at_k(k), (), self.config, self.config_hash)
+            if sig is not None:
+                signals.append(sig)
         return signals
 
     def _evaluate_bear(self, asof: date, prepared: Mapping[str, TickerData]) -> list[Signal]:

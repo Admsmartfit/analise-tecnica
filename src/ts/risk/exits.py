@@ -49,6 +49,10 @@ def exit_params_for(setup: str, cfg: StrategyConfig, breakeven_cost_pct: float =
     if setup == "D":
         return ExitParams(trailing="CHANDELIER", chandelier_k=s.D.trailing_chandelier_k,
                           stagnation_bars=s.D.stagnation_bars, stagnation_mfe_r=s.D.stagnation_mfe_r, lot=lot)
+    if setup == "G":
+        # Chandelier active from the first bar (lab M2); the initial stop is the 2.8 ATR protective stop.
+        return ExitParams(trailing="CHANDELIER", trailing_activation_r=0.0, chandelier_k=s.G.trailing_chandelier_k,
+                          lot=lot, breakeven_cost_pct=breakeven_cost_pct)
     if setup == "F":
         return ExitParams(time_stop_bars=s.F.time_stop_bars, exit_above_sma=True, lot=lot,
                           breakeven_cost_pct=breakeven_cost_pct)

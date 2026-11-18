@@ -80,6 +80,25 @@ def test_probation_book_survives_serialization() -> None:
     assert back.probation["F:PETR4"].entry_price == 30.0 and back.probation_pending[0].ticker == "VALE3"
 
 
+def test_monthly_rsi_uses_only_completed_months() -> None:
+    """Setup G's monthly RSI on any day of month m must come from months <= m-1 (no look-ahead)."""
+    import pandas as pd
+
+    from ts.strategy.features import compute_features
+
+    bars, _, sessions = market(320)
+    df = next(iter(bars.values()))
+    cfg = StrategyConfig()
+    full = compute_features(df, cfg).set_index("session_date")["rsi_month"]
+    for d in sessions[-80::7]:
+        part = compute_features(df[df["session_date"] <= d], cfg).set_index("session_date")["rsi_month"]
+        assert (pd.isna(part.loc[d]) and pd.isna(full.loc[d])) or abs(part.loc[d] - full.loc[d]) < 1e-9
+    days = pd.Series(full.index)
+    same_month = days.map(lambda x: (x.year, x.month))
+    # constant inside each calendar month (it only changes when a month closes)
+    assert full.groupby(same_month.values).nunique(dropna=False).max() == 1
+
+
 def test_setup_f_exit_when_close_above_short_sma() -> None:
     cfg = _cfg()
     params = exit_params_for("F", cfg)

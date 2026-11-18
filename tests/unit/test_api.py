@@ -76,7 +76,7 @@ def test_checklist_endpoint(client: TestClient) -> None:
     d = client.get(f"/api/checklist/{t}").json()
     assert d["ticker"] == t and len(d["common"]) == 3
     ids = {s["id"]: s for s in d["setups"]}
-    assert set(ids) == {"A", "B", "C", "D", "E", "F"} and ids["A"]["total"] >= 5
+    assert set(ids) == {"A", "B", "C", "D", "E", "F", "G"} and ids["A"]["total"] >= 5
     from ts.core.config import load_strategy_config
 
     cfg, _ = load_strategy_config(REPO / "config" / "strategy.yaml")
