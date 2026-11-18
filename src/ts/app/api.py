@@ -313,20 +313,32 @@ def _version_info(ctx: TerminalContext) -> dict[str, Any]:
         ctx._version_running = True  # type: ignore[attr-defined]
 
         def work() -> None:
-            from ts.app.version import check_version
-
             try:
-                v = check_version(ctx.root)
-                info = {"installed": v.installed, "installed_date": v.installed_date, "available": v.available,
-                        "update_available": v.update_available, "pending": v.pending, "error": v.error}
-            except Exception as e:  # noqa: BLE001
-                info = {"error": str(e), "update_available": False}
-            with ctx._lock:
-                ctx._cache["version"] = (time.time(), info)
-            ctx._version_running = False  # type: ignore[attr-defined]
+                _store_version(ctx, _check_version_now(ctx))
+            finally:
+                ctx._version_running = False  # type: ignore[attr-defined]
 
         threading.Thread(target=work, daemon=True).start()
     return cached[1] if cached else {"checking": True, "update_available": False}
+
+
+def _check_version_now(ctx: TerminalContext) -> dict[str, Any]:
+    from ts.app.version import check_version
+
+    try:
+        v = check_version(ctx.root)
+        info = {"installed": v.installed, "installed_date": v.installed_date, "available": v.available,
+                "update_available": v.update_available, "pending": v.pending, "error": v.error,
+                "modified": v.modified or []}
+    except Exception as e:  # noqa: BLE001
+        info = {"error": str(e), "update_available": False}
+    info["checked_at"] = datetime.now().isoformat(timespec="seconds")
+    return info
+
+
+def _store_version(ctx: TerminalContext, info: dict[str, Any]) -> None:
+    with ctx._lock:
+        ctx._cache["version"] = (time.time(), info)
 
 
 def build_watchlist(ctx: TerminalContext) -> list[dict[str, Any]]:
@@ -665,6 +677,15 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
     @app.get("/api/chart/{ticker}")
     def chart(ticker: str, period: str = "1A") -> dict[str, Any]:
         return build_chart(ctx, ticker, period)
+
+    @app.get("/api/version")
+    def version(refresh: bool = False) -> dict[str, Any]:
+        """Installed version and pending changes; ``refresh=true`` checks GitHub now (git fetch, a few seconds)."""
+        if refresh:
+            info = _check_version_now(ctx)
+            _store_version(ctx, info)
+            return info
+        return _version_info(ctx)
 
     @app.get("/api/checklist/{ticker}")
     def checklist(ticker: str) -> dict[str, Any]:

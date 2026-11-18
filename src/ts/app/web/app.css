@@ -158,6 +158,17 @@ kbd { font: 11px/1 var(--font); padding: 2px 5px; border: 1px solid var(--line);
 .palette-foot { padding: 8px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .keys td { padding: 5px 10px 5px 0; } .keys td:first-child { white-space: nowrap; }
 
+/* ---------------------------------------------------------------- versão / atualizações */
+.ver-btn { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#dlg-update { width: min(620px, 92vw); }
+#dlg-update .dlg-actions { align-items: center; }
+.vstate { display: flex; align-items: center; gap: 6px; margin: 12px 0 6px; }
+.vstate.ok { color: var(--ok); } .vstate.warn { color: var(--warn); } .vstate.bad { color: var(--danger); }
+.changes { margin: 4px 0 8px; padding-left: 18px; max-height: 220px; overflow: auto; font-size: 12px; }
+.changes li { margin: 2px 0; } .changes code { color: var(--muted); }
+.howto { margin-top: 10px; } .howto summary { cursor: pointer; color: var(--muted); } .howto ol { margin: 6px 0 0; padding-left: 18px; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
 /* ---------------------------------------------------------------- Hoje */
 .today { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; padding: 10px; align-content: start; }
 .today .card { display: flex; flex-direction: column; gap: 6px; min-width: 0; }

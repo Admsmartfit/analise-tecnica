@@ -24,7 +24,7 @@ const ICONS = {
   play: '<path d="m6 4 14 8-14 8z"/>', download: '<path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/>',
   chart: '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/>', tab: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  check: '<path d="m5 12 5 5L20 7"/>', chevL: '<path d="m15 18-6-6 6-6"/>', chevR: '<path d="m9 18 6-6-6-6"/>', chevD: '<path d="m6 9 6 6 6-6"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  check: '<path d="m5 12 5 5L20 7"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>', chevL: '<path d="m15 18-6-6 6-6"/>', chevR: '<path d="m9 18 6-6-6-6"/>', chevD: '<path d="m6 9 6 6 6-6"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
 };
 const ico = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 function paintIcons(root = document) { for (const el of $$('[data-ico]', root)) el.outerHTML = ico(el.dataset.ico); }
@@ -163,8 +163,7 @@ async function loadStatus() {
   $('#st-breadth').innerHTML = br && br.pct_above_sma50 != null
     ? `Amplitude: <b>${nf(0).format(br.pct_above_sma50 * 100)}% acima da MM50</b> · Roteador: <b>${br.router_enabled ? 'ligado' : 'desligado'}</b>` : '';
   $('#st-breadth').title = 'Parcela das ações do universo fechando acima da média de 50 dias (força interna do mercado).';
-  const v = s.version || {};
-  $('#st-update').classList.toggle('hidden', !v.update_available);
+  renderVersionBadge(s.version || {});
   renderBanner(s);
 }
 
@@ -221,15 +220,52 @@ async function openCandidate() {
   $('#dlg-candidate-reject').onclick = async () => { dlg.close(); await runAction(`reject?id=${encodeURIComponent(c.id)}`, 'Rejeitando a candidata…'); };
 }
 
+// ======================================================================== versão e atualizações
+function renderVersion(v) {
+  const body = $('#dlg-update-body'); const go = $('#dlg-update-go');
+  if (!v || v.checking) { body.innerHTML = '<div class="skeleton"></div><div class="skeleton" style="width:60%"></div>'; go.disabled = true; return; }
+  const short = (h) => (h ? h.slice(0, 7) : '—');
+  const checked = v.checked_at ? new Date(v.checked_at).toLocaleString('pt-BR') : '—';
+  const mod = v.modified || [];
+  let status;
+  if (v.error) status = `<p class="vstate bad">${ico('stop')} Não foi possível consultar o GitHub: ${esc(v.error)}</p><p class="note">Confira a internet e tente "Verificar agora".</p>`;
+  else if (v.update_available) status = `<p class="vstate warn">${ico('refresh')} <b>${(v.pending || []).length} mudança(s) disponível(is)</b></p>
+      <ul class="changes">${(v.pending || []).slice(0, 20).map((l) => `<li><code>${esc(l.slice(0, 7))}</code> ${esc(l.slice(8))}</li>`).join('')}</ul>`;
+  else status = `<p class="vstate ok">${ico('check')} Você está na versão mais recente.</p>`;
+  const blocked = mod.length ? `<p class="vstate bad">${ico('stop')} A atualização será recusada: há arquivos alterados nesta máquina</p>
+      <ul class="changes">${mod.slice(0, 10).map((f) => `<li><code>${esc(f)}</code></li>`).join('')}</ul>
+      <p class="note">Desfaça essas alterações (ou envie-as pelo repositório de desenvolvimento) antes de atualizar.</p>` : '';
+  body.innerHTML = `<table class="mini"><tbody>
+      <tr><td>Versão instalada</td><td class="num"><code>${short(v.installed)}</code> · ${esc(v.installed_date || '—')}</td></tr>
+      <tr><td>Versão no GitHub</td><td class="num"><code>${short(v.available)}</code></td></tr>
+      <tr><td>Última verificação</td><td class="num">${checked}</td></tr></tbody></table>${status}${blocked}`;
+  go.disabled = !v.update_available || mod.length > 0;
+  go.title = go.disabled ? (mod.length ? 'Há arquivos alterados nesta máquina' : 'Nada para atualizar') : '';
+}
+
+async function openVersion(refresh = false) {
+  const dlg = $('#dlg-update');
+  if (!dlg.open) dlg.showModal();
+  renderVersion(refresh ? { checking: true } : (state.status?.version || { checking: true }));
+  try {
+    const v = await api(`/api/version${refresh ? '?refresh=true' : ''}`);
+    if (state.status) state.status.version = v;
+    renderVersion(v); renderVersionBadge(v);
+  } catch (e) { renderVersion({ error: e.message }); }
+}
+
+function renderVersionBadge(v) {
+  $('#st-ver').textContent = v?.installed ? v.installed.slice(0, 7) : 'versão';
+  $('#st-update').classList.toggle('hidden', !v?.update_available);
+}
+
 function setupUpdate() {
   const dlg = $('#dlg-update');
-  $('#st-update').onclick = () => {
-    const v = state.status?.version || {};
-    $('#dlg-update-list').innerHTML = (v.pending || []).slice(0, 15).map((l) => `<li>${esc(l)}</li>`).join('') || '<li>Correções e melhorias</li>';
-    dlg.showModal();
-  };
+  $('#st-update').onclick = () => openVersion(false);
+  $('#btn-version').onclick = () => openVersion(false);
+  $('#dlg-update-check').onclick = () => openVersion(true);
   $('#dlg-update-cancel').onclick = () => dlg.close();
-  $('#dlg-update-go').onclick = async () => { dlg.close(); await runAction('update', 'Atualizando e rodando os testes…'); };
+  $('#dlg-update-go').onclick = async () => { dlg.close(); await runAction('update', 'Atualizando e rodando os testes (alguns minutos)…'); };
 }
 
 // ======================================================================== ações (jobs)
@@ -697,7 +733,8 @@ function commands() {
     { grp: 'Ação', label: 'Rodar o G0 (validação)', sub: s.g0?.last ? `último ${dmy(s.g0.last.date)}` : 'pendente', icon: 'play',
       run: () => runAction('g0', 'Rodando o G0 (leva alguns minutos)…'), keys: 'g0 go validacao backtest portao' },
   ];
-  if (s.version?.update_available) cmds.push({ grp: 'Ação', label: 'Instalar atualização', icon: 'refresh', run: () => $('#st-update').click(), keys: 'update versao' });
+  cmds.push({ grp: 'Ação', label: 'Versão e atualizações', sub: s.version?.update_available ? 'há versão nova' : 'verificar agora',
+    icon: 'refresh', run: () => openVersion(true), keys: 'atualizar atualizacao update versao github instalar' });
   for (const [k, v] of Object.entries(TAB_NAMES)) {
     cmds.push({ grp: 'Aba', label: v, icon: 'tab', run: () => { state.tab = k; store.set('tab', k); renderTab(); }, keys: `aba ${k}` });
   }
@@ -774,6 +811,7 @@ function setupShortcuts() {
     if (/^[1-6]$/.test(ev.key)) { state.tab = tabs[+ev.key - 1]; store.set('tab', state.tab); renderTab(); }
     else if (ev.key === '/') { ev.preventDefault(); $('#watch-filter').focus(); }
     else if (ev.key === '?') { $('#dlg-help').showModal(); }
+    else if (ev.key.toLowerCase() === 'u') { openVersion(true); }
     else if (ev.key.toLowerCase() === 'r') { refreshAll(); toast('Dados recarregados.'); }
     else if (ev.key.toLowerCase() === 'f' && state.selected) {
       state.favs.has(state.selected) ? state.favs.delete(state.selected) : state.favs.add(state.selected);

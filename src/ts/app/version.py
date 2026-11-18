@@ -30,6 +30,7 @@ class VersionInfo:
     branch: str
     pending: list[str]
     error: str | None = None
+    modified: list[str] | None = None  # tracked files changed on this machine (update.ps1 refuses to run)
 
     @property
     def update_available(self) -> bool:
@@ -45,7 +46,8 @@ def check_version(root: Path = ROOT, branch: str = "main", fetch: bool = True) -
             _git(["fetch", "--quiet", "origin", branch], root, timeout=60)
         remote = _git(["rev-parse", f"origin/{branch}"], root)
         pending = _git(["log", "--format=%h %s", f"HEAD..origin/{branch}"], root).splitlines() if remote != head else []
-        return VersionInfo(head, head_date, remote, branch, pending)
+        modified = [ln[3:] for ln in _git(["status", "--porcelain", "--untracked-files=no"], root).splitlines() if ln.strip()]
+        return VersionInfo(head, head_date, remote, branch, pending, modified=modified)
     except (OSError, subprocess.SubprocessError) as e:
         return VersionInfo(None, None, None, branch, [], error=str(e))
 

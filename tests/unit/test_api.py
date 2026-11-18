@@ -150,6 +150,23 @@ def test_desktop_survives_pythonw_without_console(tmp_path: Path, monkeypatch: p
     assert "ok" in log.read_text(encoding="utf-8")
 
 
+def test_version_endpoint_refresh(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import ts.app.version as ver
+
+    calls = []
+
+    def fake(_root: Path, branch: str = "main", fetch: bool = True) -> ver.VersionInfo:
+        calls.append(fetch)
+        return ver.VersionInfo("a" * 40, "18/11/2026 10:00", "b" * 40, branch, ["bbbbbbb Nova regra"],
+                               modified=["config/settings.yaml"])
+
+    monkeypatch.setattr(ver, "check_version", fake)
+    v = client.get("/api/version?refresh=true").json()
+    assert calls and v["update_available"] and v["pending"] == ["bbbbbbb Nova regra"]
+    assert v["modified"] == ["config/settings.yaml"] and v["checked_at"]
+    assert client.get("/api/status").json()["version"]["installed"] == "a" * 40  # refreshed value is cached
+
+
 def test_empty_terminal_tabs(client: TestClient) -> None:
     assert client.get("/api/positions").json() == []
     assert client.get("/api/orders").json() == []

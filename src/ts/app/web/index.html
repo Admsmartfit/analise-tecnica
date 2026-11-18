@@ -22,6 +22,7 @@
     <button id="btn-palette" class="cmd-btn" type="button" title="Buscar ativo ou executar uma ação (Ctrl+K)">
       <span data-ico="search"></span><span>Buscar ou executar…</span><kbd>Ctrl K</kbd></button>
     <button id="st-update" class="badge hidden" type="button" title="Há uma versão nova"><span data-ico="refresh"></span> Atualização disponível</button>
+    <button id="btn-version" class="icon-btn ver-btn" type="button" title="Versão instalada e atualizações"><span data-ico="info"></span> <span id="st-ver">versão</span></button>
     <button id="btn-help" class="icon-btn" type="button" title="Atalhos de teclado (?)" aria-label="Atalhos de teclado"><span data-ico="keyboard"></span></button>
     <button id="btn-settings" class="icon-btn" type="button" title="Aparência" aria-label="Aparência"><span data-ico="settings"></span></button>
   </header>
@@ -111,11 +112,23 @@
   </main>
 
   <dialog id="dlg-update" aria-labelledby="dlg-update-title">
-    <h3 id="dlg-update-title">Nova versão disponível</h3>
-    <p class="muted">A atualização baixa o código, roda os testes e volta sozinha à versão anterior se algo falhar.</p>
-    <ul id="dlg-update-list"></ul>
+    <h3 id="dlg-update-title">Versão e atualizações</h3>
+    <div id="dlg-update-body"></div>
+    <details class="howto"><summary>Como funciona a atualização</summary>
+      <ol class="note">
+        <li>Baixa a versão nova do GitHub (o que foi enviado com commit + push).</li>
+        <li>Roda todos os testes automáticos com a versão nova.</li>
+        <li>Se algum teste falhar, volta sozinha para a versão atual (nada se perde).</li>
+        <li>Não roda enquanto o EOD, a pré-abertura ou o backup estiverem rodando.</li>
+        <li>Se as regras de estratégia mudaram, a contagem do paper recomeça e o G0 precisa ser rodado de novo.</li>
+        <li>Ela também roda sozinha de tempos em tempos (tarefa agendada TS_Update), exceto em dias úteis
+          das 08:30 às 09:15 e das 19:00 às 21:00, para não atrapalhar a pré-abertura e o EOD.</li>
+      </ol>
+    </details>
     <div class="dlg-actions">
-      <button type="button" id="dlg-update-cancel">Agora não</button>
+      <button type="button" id="dlg-update-check"><span data-ico="refresh"></span> Verificar agora</button>
+      <span class="sb-spacer"></span>
+      <button type="button" id="dlg-update-cancel">Fechar</button>
       <button type="button" id="dlg-update-go" class="primary">Atualizar agora</button>
     </div>
   </dialog>
@@ -160,6 +173,7 @@
       <tr><td><kbd>1</kbd> … <kbd>6</kbd></td><td>Abas: Hoje, Posições, Ordens, Sinais, Patrimônio, Diário</td></tr>
       <tr><td><kbd>F</kbd></td><td>Favoritar o ativo selecionado</td></tr>
       <tr><td><kbd>R</kbd></td><td>Recarregar os dados agora</td></tr>
+      <tr><td><kbd>U</kbd></td><td>Versão e atualizações</td></tr>
       <tr><td><kbd>?</kbd></td><td>Esta ajuda</td></tr>
     </tbody></table>
     <div class="dlg-actions"><button type="button" id="dlg-help-close" class="primary">Fechar</button></div>
