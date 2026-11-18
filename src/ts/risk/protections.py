@@ -80,8 +80,11 @@ class SetupStatisticalMonitor:
         reference_r: dict[str, Sequence[float]] | None = None,
         cusum_k_sigma: float = 0.5,
         cusum_h_sigma: float = 5.0,
+        resume_trades: int = 0,
     ) -> None:
         self.window = window
+        self.resume_trades = resume_trades
+        self.probation_r: dict[str, list[float]] = {}  # shadow R of suspended setups (since suspension)
         self.bootstrap_quantile = bootstrap_quantile
         self.reference_r = {k: list(v) for k, v in (reference_r or {}).items()}
         self.cusum_k_sigma = cusum_k_sigma
@@ -134,6 +137,29 @@ class SetupStatisticalMonitor:
 
     def is_suspended(self, setup_id: str) -> bool:
         return setup_id in self.suspended_setups
+
+    def record_probation(self, setup_id: str, r_multiple: float) -> bool:
+        """Shadow trade of a suspended setup. Returns True when the setup is resumed.
+
+        Without this a suspension is absorbing: a suspended setup produces no trades, so it can never show that
+        it recovered. Resume rule: the last ``resume_trades`` shadow trades have a positive mean (and, when a
+        backtest reference exists, a mean above its bootstrap threshold). The live window restarts from zero.
+        """
+        if setup_id not in self.suspended_setups or self.resume_trades <= 0:
+            return False
+        hist = self.probation_r.setdefault(setup_id, [])
+        hist.append(float(r_multiple))
+        if len(hist) < self.resume_trades:
+            return False
+        mean_r = float(np.mean(hist[-self.resume_trades:]))
+        thr = self._threshold(setup_id)
+        if mean_r <= 0.0 or (thr is not None and mean_r < thr):
+            return False
+        del self.suspended_setups[setup_id]
+        self.probation_r.pop(setup_id, None)
+        self.trades_r_by_setup[setup_id] = []
+        self._cusum[setup_id] = 0.0
+        return True
 
 
 class CircuitBreaker:

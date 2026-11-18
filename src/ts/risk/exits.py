@@ -32,6 +32,7 @@ class ExitParams:
     lot: int = 100
     breakeven_cost_pct: float = 0.001
     breakeven_after_r: float | None = None  # trend trades: floor the stop at entry + costs once MFE >= this
+    exit_above_sma: bool = False  # setup F: leave at the next open once the close is above the short SMA
 
 
 def exit_params_for(setup: str, cfg: StrategyConfig, breakeven_cost_pct: float = 0.001, fractional: bool = False) -> ExitParams:
@@ -48,6 +49,9 @@ def exit_params_for(setup: str, cfg: StrategyConfig, breakeven_cost_pct: float =
     if setup == "D":
         return ExitParams(trailing="CHANDELIER", chandelier_k=s.D.trailing_chandelier_k,
                           stagnation_bars=s.D.stagnation_bars, stagnation_mfe_r=s.D.stagnation_mfe_r, lot=lot)
+    if setup == "F":
+        return ExitParams(time_stop_bars=s.F.time_stop_bars, exit_above_sma=True, lot=lot,
+                          breakeven_cost_pct=breakeven_cost_pct)
     mr = s.B if setup == "B" else s.E
     return ExitParams(partial_target_r=mr.partial_target_r, partial_pct=mr.partial_pct,
                       final_target_r=mr.final_target_r, time_stop_bars=mr.time_stop_bars,
@@ -107,6 +111,7 @@ def evaluate_position_exit(
     donchian10_lower: float | None = None,
     cost_buffer_pct: float | None = None,
     params: ExitParams | None = None,
+    sma_exit: float | None = None,
 ) -> ExitDecision:
     """Evaluate one closed bar for an open position (mutates bars_held, extremes, stop, partial flag)."""
     if params is None:
@@ -145,6 +150,9 @@ def evaluate_position_exit(
                 # Lot too small to split: keep the whole position with the stop moved to break-even.
         if pos.target_price is not None and high_p >= pos.target_price:
             return ExitDecision(True, ExitReason.TARGET, pos.qty_open, max(open_p, pos.target_price))
+        if params.exit_above_sma and sma_exit is not None and sma_exit == sma_exit and close_p > sma_exit:
+            # mean reversion done (Connors): known only at the close -> sell in the next opening auction
+            return ExitDecision(True, ExitReason.TARGET, pos.qty_open, close_p, at_next_open=True)
         if params.time_stop_bars is not None and pos.bars_held >= params.time_stop_bars:
             return ExitDecision(True, ExitReason.TIME, pos.qty_open, close_p, at_next_open=True)
 

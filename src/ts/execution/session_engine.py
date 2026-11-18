@@ -149,6 +149,10 @@ class BookState:
     cooldown: AssetCooldownTracker = field(default_factory=AssetCooldownTracker)
     monitor: SetupStatisticalMonitor = field(default_factory=SetupStatisticalMonitor)
     breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
+    # Probation book of suspended setups (key "setup:ticker"): virtual, 1 lot, never touches cash or the
+    # circuit-breaker shadow curve; only feeds SetupStatisticalMonitor.record_probation.
+    probation: dict[str, PositionRecord] = field(default_factory=dict)
+    probation_pending: list[PendingOrder] = field(default_factory=list)
 
     @classmethod
     def new(cls, capital: float, cfg: StrategyConfig, calendar: B3Calendar | None = None,
@@ -161,7 +165,7 @@ class BookState:
             cooldown=AssetCooldownTracker(p.cooldown_stops_count, p.cooldown_lookback_days, p.cooldown_pause_days,
                                           sessions_between=sessions_fn),
             monitor=SetupStatisticalMonitor(p.setup_monitor_window, p.setup_bootstrap_quantile, reference_r,
-                                            p.cusum_k_sigma, p.cusum_h_sigma),
+                                            p.cusum_k_sigma, p.cusum_h_sigma, p.setup_resume_trades),
             breaker=CircuitBreaker(p.circuit_breaker_dd_level1, p.circuit_breaker_dd_level2, p.shadow_sma_period,
                                    capital, p.circuit_breaker_level1_risk_multiplier,
                                    p.quarantine_consecutive_losses),
@@ -199,7 +203,10 @@ class BookState:
                 "trades": self.monitor.trades_r_by_setup,
                 "suspended": self.monitor.suspended_setups,
                 "cusum": self.monitor._cusum,
+                "probation_r": self.monitor.probation_r,
             },
+            "probation": [pos(p) for p in self.probation.values()],
+            "probation_pending": [order(o) for o in self.probation_pending],
             "breaker": {
                 "peak": b.peak_equity, "current": b.current_equity, "shadow": b.shadow_equity_curve[-400:],
                 "halted": b.is_halted, "sessions_halted": b.sessions_halted, "dd": b.drawdown,
@@ -235,6 +242,10 @@ class BookState:
         st.monitor.trades_r_by_setup = {k: list(v) for k, v in mo.get("trades", {}).items()}
         st.monitor.suspended_setups = dict(mo.get("suspended", {}))
         st.monitor._cusum = dict(mo.get("cusum", {}))
+        st.monitor.probation_r = {k: list(v) for k, v in mo.get("probation_r", {}).items()}
+        st.probation = {f"{p['setup']}:{p['ticker']}": pos(p) for p in data.get("probation", [])}
+        st.probation_pending = [PendingOrder(**{**o, "valid_until": date.fromisoformat(o["valid_until"])})
+                                for o in data.get("probation_pending", [])]
         br = data.get("breaker", {})
         if br:
             b = st.breaker
@@ -328,8 +339,10 @@ class SessionEngine:
         index_returns: pd.Series | None = None,
         universe: set[str] | None = None,
         plan: bool = True,
+        market_bear: bool | None = None,
     ) -> SessionResult:
         res = SessionResult(session_date=d)
+        self._market_bear = market_bear  # read by _plan (setup F only trades in a bear market)
         state.breaker.just_halted = False
         bars_today: dict[str, tuple[int, dict[str, float]]] = {}
         for t, td in prepared.items():
@@ -340,6 +353,8 @@ class SessionEngine:
 
         opened_today = self._execute_orders(state, d, bars_today, res)
         self._manage_positions(state, d, prepared, bars_today, opened_today, res)
+        if state.probation or state.probation_pending:
+            self._run_probation(state, d, prepared, bars_today, res)
         snap = self._mark_to_market(state, d, regime_percentile)
         res.equity = snap
         state.last_session = d
@@ -473,6 +488,7 @@ class SessionEngine:
                 lows = td.view._cols["raw_low"][max(0, k - 9): k + 1]
                 donch = float(np.min(lows)) if len(lows) == 10 else None
                 params = self.exit_params(pos.setup)
+                sma_exit = float(td.view._cols["sma_f"][k]) / factor if params.exit_above_sma else None
                 high = b["high"]
                 key = ("S:" if shadow else "") + ticker
                 if key in opened_today and params.partial_target_r is not None:
@@ -485,7 +501,7 @@ class SessionEngine:
                 dec = evaluate_position_exit(
                     pos, d, b["open"], high, b["low"], b["close"],
                     atr22=atr22 if math.isfinite(atr22) else None,
-                    donchian10_lower=donch, params=params,
+                    donchian10_lower=donch, params=params, sma_exit=sma_exit,
                 )
                 self._apply_exit(state, pos, d, dec, res)
 
@@ -601,7 +617,8 @@ class SessionEngine:
     ) -> None:
         candidates = {t: td for t, td in prepared.items() if universe is None or t in universe}
         signals = self.signal_engine.evaluate_prepared(
-            d, candidates, index_bars if index_bars is not None else pd.DataFrame(), market_ok=market_ok
+            d, candidates, index_bars if index_bars is not None else pd.DataFrame(), market_ok=market_ok,
+            market_bear=getattr(self, "_market_bear", None),
         )
         if not signals:
             return
@@ -642,6 +659,9 @@ class SessionEngine:
                 continue
             if state.monitor.is_suspended(sig.setup.value):
                 rec.disposition, rec.reason = "REJECTED_SETUP", state.monitor.suspended_setups.get(sig.setup.value)
+                if state.monitor.resume_trades > 0:
+                    self._probation_order(state, sig, nd, equity)
+                    rec.reason = f"{rec.reason} — acompanhado na sombra para poder voltar"
                 continue
             sz = calculate_position_size(
                 sig.entry_ref, sig.stop_price, sig.features.get("atr14_raw", float("nan")), equity,
@@ -680,6 +700,90 @@ class SessionEngine:
         if self._breadth_cache is None or self._breadth_cache[0] != key:
             self._breadth_cache = (key, compute_breadth(prepared))
         return self._breadth_cache[1]
+
+    # ------------------------------------------------------------------ probation of suspended setups
+    def _probation_order(self, state: BookState, sig: Signal, nd: date, equity: float) -> None:
+        key = f"{sig.setup.value}:{sig.ticker}"
+        if key in state.probation or any(f"{o.setup}:{o.ticker}" == key for o in state.probation_pending):
+            return
+        # same stop rules as a real entry (1–3 ATR); the size itself is irrelevant (R is per share)
+        sz = calculate_position_size(sig.entry_ref, sig.stop_price, sig.features.get("atr14_raw", float("nan")),
+                                     max(equity, 1.0), self.cfg.risk, gap_p01=sig.features.get("gap_p01"))
+        if not sz.accepted:
+            return
+        prot = self.cfg.risk.auction_limit_protection_pct
+        state.probation_pending.append(PendingOrder(
+            client_order_id=f"PB{key}", signal_id=sig.signal_id, ticker=sig.ticker, side="BUY", kind=sig.entry_type,
+            qty=1, entry_ref=sig.entry_ref,
+            limit_price=sig.entry_ref * (1 + prot) if sig.entry_type == "OPEN_AUCTION" else None,
+            stop_price=sz.stop_price, target_r=None, setup=sig.setup.value, trade_class=sig.trade_class.value,
+            valid_until=nd, reason="probation", target_price=sig.target_price,
+        ))
+
+    def _run_probation(self, state: BookState, d: date, prepared: Mapping[str, TickerData],
+                       bars: dict[str, tuple[int, dict[str, float]]], res: SessionResult) -> None:
+        slip, emol = self.costs.slippage_pct, self.costs.b3_emoluments_pct
+
+        def close(key: str, pos: PositionRecord, price: float) -> None:
+            r = ((price - pos.entry_price) - (price + pos.entry_price) * emol) / pos.risk_r
+            del state.probation[key]
+            if state.monitor.record_probation(pos.setup, r):
+                res.notes.append(f"SETUP_RESUMED {pos.setup}: média positiva nas últimas "
+                                 f"{state.monitor.resume_trades} operações-sombra")
+
+        for key, pos in list(state.probation.items()):  # exits decided at yesterday's close
+            if pos.pending_exit is not None and pos.ticker in bars:
+                close(key, pos, bars[pos.ticker][1]["open"] * (1 - slip))
+        keep = []
+        for o in state.probation_pending:
+            bar = bars.get(o.ticker)
+            if bar is None:
+                if o.valid_until > d:
+                    keep.append(o)
+                continue
+            b = bar[1]
+            if o.kind == "OPEN_AUCTION":
+                if (o.limit_price is not None and b["open"] > o.limit_price) or b["open"] * (1 + slip) <= o.stop_price:
+                    continue
+                fill = b["open"] * (1 + slip)
+            elif b["high"] >= o.entry_ref:
+                fill = max(b["open"], o.entry_ref) * (1 + slip)
+            else:
+                continue
+            state.probation[f"{o.setup}:{o.ticker}"] = PositionRecord(
+                position_id=o.client_order_id, ticker=o.ticker, setup=o.setup, trade_class=TradeClass(o.trade_class),
+                entry_date=d, entry_price=fill, initial_stop=o.stop_price, current_stop=o.stop_price,
+                target_price=o.target_price, qty_initial=1, qty_open=1, risk_r=max(fill - o.stop_price, 1e-9),
+                highest_price_seen=fill, lowest_price_seen=fill,
+                extra={"entry_kind_stop": 1.0 if o.kind == "BUY_STOP" else 0.0})
+        state.probation_pending = keep
+        for key, pos in list(state.probation.items()):
+            if pos.pending_exit is not None or pos.ticker not in bars:
+                continue
+            k, b = bars[pos.ticker]
+            atr22, donch, sma_exit = self._exit_inputs(prepared[pos.ticker], k, b["factor"] or 1.0)
+            params = replace(self.exit_params(pos.setup), partial_target_r=None)  # whole position, simpler R
+            # same conservative rule as the real book: a buy-stop filled today cannot use the bar's high
+            high = max(pos.entry_price, b["close"]) if pos.entry_date == d and pos.extra.get("entry_kind_stop") \
+                else b["high"]
+            dec = evaluate_position_exit(pos, d, b["open"], high, b["low"], b["close"], atr22=atr22,
+                                         donchian10_lower=donch, params=params,
+                                         sma_exit=sma_exit if params.exit_above_sma else None)
+            if not dec.should_exit:
+                continue
+            if dec.at_next_open:
+                pos.pending_exit = dec.exit_reason
+            else:
+                stop_like = dec.exit_reason in (ExitReason.STOP, ExitReason.TRAILING, ExitReason.BREAKEVEN)
+                close(key, pos, dec.exit_price * (1 - slip) if stop_like else dec.exit_price)
+
+    @staticmethod
+    def _exit_inputs(td: TickerData, k: int, factor: float) -> tuple[float | None, float | None, float | None]:
+        atr22 = float(td.view._cols["atr22"][k]) / factor
+        lows = td.view._cols["raw_low"][max(0, k - 9): k + 1]
+        donch = float(np.min(lows)) if len(lows) == 10 else None
+        sma = float(td.view._cols["sma_f"][k]) / factor if "sma_f" in td.view._cols else None
+        return (atr22 if math.isfinite(atr22) else None), donch, sma
 
     def _shadow_order(self, state: BookState, sig: Signal, d: date, nd: date, equity: float, rec: SignalRecord) -> None:
         rec.disposition, rec.reason = "SHADOW", "circuit breaker level 2: tracked in shadow book"

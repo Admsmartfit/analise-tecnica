@@ -178,12 +178,28 @@ class SetupEConfig(BaseModel):
     min_rr_filter: float = 3.0
 
 
+class SetupFConfig(BaseModel):
+    """Reversão em mercado de baixa (Connors IFR2 condicionado ao regime). Só opera com o IBOV em BAIXA
+    (close < MM200 e MM50 < MM200), quando os setups de tendência estão bloqueados; não exige tendência do ativo."""
+
+    name: str = "Reversao_Baixa"
+    trade_class: Literal["MEAN_REVERSION"] = "MEAN_REVERSION"
+    enabled: bool = False
+    rsi_period: int = 2
+    rsi_max: float = 10.0
+    exit_sma: int = 5  # sai na abertura seguinte quando o fechamento passa acima desta média
+    time_stop_bars: int = 10
+    stop_atr_k: float = 2.8  # stop de proteção (o dimensionamento aceita no máximo stop_atr_max_k ATR)
+    entry_type: Literal["OPEN_AUCTION"] = "OPEN_AUCTION"
+
+
 class SetupsContainer(BaseModel):
     A: SetupAConfig = Field(default_factory=SetupAConfig)
     B: SetupBConfig = Field(default_factory=SetupBConfig)
     C: SetupCConfig = Field(default_factory=SetupCConfig)
     D: SetupDConfig = Field(default_factory=SetupDConfig)
     E: SetupEConfig = Field(default_factory=SetupEConfig)
+    F: SetupFConfig = Field(default_factory=SetupFConfig)
 
 
 class RiskConfig(BaseModel):
@@ -240,6 +256,9 @@ class ProtectionsConfig(BaseModel):
     shadow_sma_period: int = 20
     # Quarentena também por sequência de perdas (PRD v2.1 ajustado). 0 desliga.
     quarantine_consecutive_losses: int = 6
+    # Setup suspenso pelo monitor continua sendo acompanhado na sombra (sem dinheiro) e volta sozinho quando as
+    # últimas N operações-sombra têm média positiva. 0 = volta só por decisão do trader (comportamento antigo).
+    setup_resume_trades: int = 20
     # CUSUM unilateral sobre R (detecção precoce de queda de média do setup).
     cusum_k_sigma: float = 0.5
     cusum_h_sigma: float = 5.0

@@ -14,6 +14,7 @@ class SetupId(str, Enum):
     C_DONCHIAN = "C"
     D_SQUEEZE = "D"
     E_DIVERGENCE = "E"
+    F_BEAR_REVERSION = "F"
 
 
 class TradeClass(str, Enum):

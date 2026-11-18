@@ -47,6 +47,8 @@ def test_index_injects_token_and_serves_static(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200 and "secret-token" in r.text and "__TS_TOKEN__" not in r.text
     assert client.get("/static/app.js").status_code == 200
+    assert "/static/app.js?v=" in r.text and "/static/app.css?v=" in r.text  # cache-busting after updates
+    assert r.headers["cache-control"] == "no-store" and client.get("/static/app.css").headers["cache-control"] == "no-cache"
     assert client.get("/static/vendor/lightweight-charts.standalone.production.js").status_code == 200
 
 
@@ -74,7 +76,11 @@ def test_checklist_endpoint(client: TestClient) -> None:
     d = client.get(f"/api/checklist/{t}").json()
     assert d["ticker"] == t and len(d["common"]) == 3
     ids = {s["id"]: s for s in d["setups"]}
-    assert set(ids) == {"A", "B", "C", "D", "E"} and ids["A"]["total"] >= 5
+    assert set(ids) == {"A", "B", "C", "D", "E", "F"} and ids["A"]["total"] >= 5
+    from ts.core.config import load_strategy_config
+
+    cfg, _ = load_strategy_config(REPO / "config" / "strategy.yaml")
+    assert all(ids[k]["enabled"] == getattr(cfg.setups, k).enabled for k in ids)  # mirrors strategy.yaml
     assert all({"label", "ok", "value", "limit"} <= set(c) for c in ids["A"]["conditions"])
     assert client.get("/api/checklist/NAOEXISTE").status_code == 404
 

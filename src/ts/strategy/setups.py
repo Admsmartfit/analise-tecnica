@@ -291,6 +291,30 @@ def evaluate_setup_e(
     )
 
 
+# --------------------------------------------------------------------------------------------------
+# Setup F — Reversão em mercado de baixa (IFR2 de Connors, condicionado ao regime do IBOV)
+# Lab 2026-11-17: só tem vantagem com o IBOV em BAIXA; em ALTA/LATERAL a mesma regra perde. Por isso o
+# signal engine só chama este avaliador quando o mercado está em baixa (BEAR_EVALUATORS).
+# --------------------------------------------------------------------------------------------------
+def evaluate_setup_f(
+    ticker: str, asof: date, data: Any, pivots: Sequence[PivotEvent], cfg: StrategyConfig, config_hash: str
+) -> Signal | None:
+    sf = cfg.setups.F
+    fv = ensure_view(data, cfg)
+    if not sf.enabled or fv.n_bars < 60:
+        return None
+    r, c_t, a = fv.v("rsi_f"), fv.v("close"), fv.v("atr14")
+    if _nan(r) or r >= sf.rsi_max or _nan(a) or a <= 0:
+        return None
+    stop = c_t - sf.stop_atr_k * a
+    if stop <= 0:
+        return None
+    return _make_signal(
+        fv, SetupId.F_BEAR_REVERSION, TradeClass.MEAN_REVERSION, ticker, asof, "OPEN_AUCTION", c_t, stop, None,
+        {"rsi2": r, "sma_exit": fv.v("sma_f")}, cfg, config_hash,
+    )
+
+
 SETUP_EVALUATORS = (
     evaluate_setup_a,
     evaluate_setup_b,
@@ -298,3 +322,4 @@ SETUP_EVALUATORS = (
     evaluate_setup_d,
     evaluate_setup_e,
 )
+BEAR_EVALUATORS = (evaluate_setup_f,)  # only when the IBOV is in a bear regime (no asset-trend filter)

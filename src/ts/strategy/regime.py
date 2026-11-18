@@ -24,6 +24,19 @@ def is_market_filter_bullish(ibov_df: pd.DataFrame, cfg: MarketFilterConfig | No
     return bool(last_c > s_long and s_short > s_long)
 
 
+def is_market_bearish(ibov_df: pd.DataFrame, cfg: MarketFilterConfig | None = None) -> bool:
+    """IBOV in a primary downtrend: Close < SMA200 and SMA50 < SMA200 (mirror of the bull filter)."""
+    cfg = cfg or MarketFilterConfig()
+    if ibov_df.empty or len(ibov_df) < cfg.ibov_sma_long:
+        return False
+    c = ibov_df["close"].astype(float)
+    s_long = sma(c, cfg.ibov_sma_long).iloc[-1]
+    s_short = sma(c, cfg.ibov_sma_short).iloc[-1]
+    if np.isnan(s_long) or np.isnan(s_short):
+        return False
+    return bool(c.iloc[-1] < s_long and s_short < s_long)
+
+
 def is_asset_primary_trend_bullish(asset_df: pd.DataFrame, period: int = 200) -> bool:
     """Asset primary trend: Close > SMA200."""
     if asset_df.empty or len(asset_df) < period:

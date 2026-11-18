@@ -136,6 +136,7 @@ class BacktestEngine:
 
         idx = index_bars.sort_values("session_date").reset_index(drop=True) if not index_bars.empty else index_bars
         market_ok: dict[date, bool] = {}
+        market_bear: dict[date, bool] = {}
         regime_pct: dict[date, float] = {}
         index_returns = pd.Series(dtype=float)
         if not idx.empty:
@@ -145,6 +146,8 @@ class BacktestEngine:
             if not cfg.market_filter.require_bull_regime:
                 ok = pd.Series(True, index=idx.index)
             market_ok = dict(zip(idx["session_date"], ok.astype(bool), strict=True))
+            bear = (c < sl) & (ss < sl) & sl.notna()
+            market_bear = dict(zip(idx["session_date"], bear.astype(bool), strict=True))
             regime_pct = dict(zip(idx["session_date"], realized_vol_percentile_series(idx, cfg.regime), strict=True))
             index_returns = pd.Series(c.pct_change().to_numpy(), index=list(idx["session_date"]))
         elif not cfg.market_filter.require_bull_regime:
@@ -171,7 +174,7 @@ class BacktestEngine:
                 state, d, prepared, market_ok=m_ok,
                 regime_percentile=None if rp is None or np.isnan(rp) else float(rp),
                 index_returns=index_returns if len(index_returns) else None,
-                universe=universe, plan=i < len(sessions) - 1,
+                universe=universe, plan=i < len(sessions) - 1, market_bear=market_bear.get(d, False),
             )
             for t in res.closed_trades:
                 (shadow if t.is_shadow else trades).append(t)

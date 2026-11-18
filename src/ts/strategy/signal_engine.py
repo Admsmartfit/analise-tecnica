@@ -21,8 +21,8 @@ from ts.core.errors import LookaheadError
 from ts.core.models import Signal
 from ts.indicators.pivots import PivotHistory, detect_pivot_events
 from ts.strategy.features import FeatureView, compute_features
-from ts.strategy.regime import is_market_filter_bullish
-from ts.strategy.setups import SETUP_EVALUATORS
+from ts.strategy.regime import is_market_bearish, is_market_filter_bullish
+from ts.strategy.setups import BEAR_EVALUATORS, SETUP_EVALUATORS
 
 logger = logging.getLogger("ts.strategy.signal_engine")
 
@@ -96,6 +96,7 @@ class SignalEngine:
         prepared: Mapping[str, TickerData],
         index_bars: pd.DataFrame,
         market_ok: bool | None = None,
+        market_bear: bool | None = None,
     ) -> list[Signal]:
         if market_ok is None:
             _check_lookahead("index_bars", index_bars, asof)
@@ -103,8 +104,13 @@ class SignalEngine:
                 index_bars, self.config.market_filter
             )
         if not market_ok:
-            logger.debug("Market filter (IBOV) not bullish on %s — no signals", asof)
-            return []
+            if not self.config.setups.F.enabled:
+                logger.debug("Market filter (IBOV) not bullish on %s — no signals", asof)
+                return []
+            if market_bear is None:
+                _check_lookahead("index_bars", index_bars, asof)
+                market_bear = is_market_bearish(index_bars, self.config.market_filter)
+            return self._evaluate_bear(asof, prepared) if market_bear else []
 
         signals: list[Signal] = []
         for ticker, td in prepared.items():
@@ -121,6 +127,20 @@ class SignalEngine:
             pivots = td.pivots.asof(asof)
             for evaluator in SETUP_EVALUATORS:
                 sig = evaluator(ticker, asof, fv, pivots, self.config, self.config_hash)
+                if sig is not None:
+                    signals.append(sig)
+        return signals
+
+    def _evaluate_bear(self, asof: date, prepared: Mapping[str, TickerData]) -> list[Signal]:
+        """Bear-market setups (F): the trend setups are blocked, and there is no asset-trend filter."""
+        signals: list[Signal] = []
+        for ticker, td in prepared.items():
+            k = td.index_of(asof)
+            if k is None or k + 1 < self.config.min_history_bars:
+                continue
+            fv = td.view.at_k(k)
+            for evaluator in BEAR_EVALUATORS:
+                sig = evaluator(ticker, asof, fv, (), self.config, self.config_hash)
                 if sig is not None:
                     signals.append(sig)
         return signals

@@ -87,6 +87,22 @@ setups:
     time_stop_bars: 8
     min_rr_filter: 3.0
 
+  # Reversão em mercado de baixa (IFR2 de Connors). Só opera com o IBOV em BAIXA (fecha < MM200 e MM50 < MM200),
+  # quando A–E estão bloqueados. Lab 2026-11-17: +1,04%/op na descoberta 2019-23 e +1,04% na prova 2024-26
+  # (só regime de baixa); em ALTA/LATERAL a mesma regra perde.
+  # Ligado em 2026-11-17 em PAPER (experimento): motor completo 2019-26 com todas as proteções: 401 op., acerto 62%,
+  # E[R] +0,056 (IC -0,01..+0,12), retorno +11,7% vs -1,9% sem F, DD 14,7%. AINDA NÃO PASSA NO G0 (IC e DSR).
+  F:
+    name: "Reversao_Baixa"
+    trade_class: "MEAN_REVERSION"
+    enabled: true
+    rsi_period: 2
+    rsi_max: 10.0
+    exit_sma: 5
+    time_stop_bars: 10
+    stop_atr_k: 2.8
+    entry_type: "OPEN_AUCTION"
+
 risk:
   risk_per_trade_pct: 0.01
   stop_atr_min_k: 1.0
@@ -139,6 +155,7 @@ protections:
   circuit_breaker_level1_risk_multiplier: 0.50
   shadow_sma_period: 20
   quarantine_consecutive_losses: 6   # quarentena por sequência de perdas (0 desliga)
+  setup_resume_trades: 20            # setup suspenso volta sozinho se as últimas 20 op. na sombra tiverem média > 0 (0 = só manual)
   cusum_k_sigma: 0.5
   cusum_h_sigma: 5.0
 

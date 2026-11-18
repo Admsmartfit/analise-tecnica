@@ -45,7 +45,8 @@ DISPOSITION_PT = {
     "REJECTED_COOLDOWN": "Ativo em cooldown após stops", "REJECTED_SETUP": "Setup suspenso pelo monitor",
     "REJECTED_SIZE": "Stop/tamanho inválido", "REJECTED_RR": "Retorno/risco abaixo de 3", "REJECTED_DUPLICATE": "Já posicionado",
 }
-SETUP_PT = {"A": "Pivô de alta", "B": "Pullback", "C": "Donchian 20/10", "D": "Bollinger squeeze", "E": "Divergência"}
+SETUP_PT = {"A": "Pivô de alta", "B": "Pullback", "C": "Donchian 20/10", "D": "Bollinger squeeze", "E": "Divergência",
+            "F": "Reversão na baixa"}
 STATE_PT = {"PLANNED": "Planejada", "SUBMITTED": "Enviada", "ACCEPTED": "Aceita", "PARTIALLY_FILLED": "Parcial",
             "FILLED": "Executada", "CANCELLED": "Cancelada", "EXPIRED": "Expirada", "REJECTED": "Rejeitada",
             "UNKNOWN": "Desconhecida"}
@@ -588,10 +589,21 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
         if not x_ts_token or not secrets.compare_digest(x_ts_token, ctx.token):
             raise HTTPException(403, "Token inválido")
 
+    @app.middleware("http")
+    async def no_stale_assets(request: Any, call_next: Any) -> Any:
+        # The desktop window (WebView2) caches heuristically: after an update it could keep the old app.js/css.
+        resp = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            resp.headers.setdefault("Cache-Control", "no-cache")
+        return resp
+
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
+    def index() -> HTMLResponse:
         html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
-        return html.replace("__TS_TOKEN__", ctx.token)
+        for asset in ("app.js", "app.css"):  # versioned URLs: a new file always means a new URL
+            v = int((WEB_DIR / asset).stat().st_mtime)
+            html = html.replace(f"/static/{asset}\"", f"/static/{asset}?v={v}\"")
+        return HTMLResponse(html.replace("__TS_TOKEN__", ctx.token), headers={"Cache-Control": "no-store"})
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

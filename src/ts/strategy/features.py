@@ -69,6 +69,9 @@ def compute_features(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
     f["sma50"], f["sma200"] = sma(c, 50), sma(c, 200)
     f["phase"] = diamond_phase(c, f["sma50"], f["sma200"])
     f["er"] = efficiency_ratio(c, cfg.regime_router.er_period)
+    sf = cfg.setups.F
+    f["rsi_f"] = rsi(c, sf.rsi_period)
+    f["sma_f"] = sma(c, sf.exit_sma)
     return f
 
 
