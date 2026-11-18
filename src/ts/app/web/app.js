@@ -630,8 +630,11 @@ async function renderToday(body) {
       <tr><td>${dot(s?.last_eod ? s.last_eod.status === 'OK' : null)}Último EOD</td><td class="num">${s?.last_eod ? `${dmy(s.last_eod.session_date)} · ${esc(s.last_eod.status)}` : 'nenhum'}</td></tr>
       <tr><td>${dot(true)}Fonte</td><td class="num">${esc(s?.connection.label || '—')}</td></tr>
       <tr><td>${dot(!(s?.quarantine || {}).active)}Proteções</td><td class="num">${(s?.quarantine || {}).active ? 'quarentena' : (s?.circuit_breaker || {}).level ? `circuit breaker ${s.circuit_breaker.level}` : 'normais'}</td></tr>
-      <tr><td>${dot(s?.g0?.last ? (s.g0.due ? null : s.g0.last.verdict === 'APROVADO') : null)}Validação G0</td><td class="num" title="${esc(s?.g0?.last?.file || '')}">${s?.g0?.last
-        ? `${esc(s.g0.last.verdict)} em ${dmy(s.g0.last.date)} · próximo ${dmy(s.g0.next_due)}` : 'pendente para as regras atuais'}</td></tr>
+      <tr title="O G0 decide só se o sistema pode ir para DINHEIRO REAL. O paper (simulação) opera normalmente em qualquer resultado.${s?.g0?.last ? ` Relatório: ${esc(s.g0.last.file)}` : ''}">
+        <td>${dot(s?.g0?.last?.verdict === 'APROVADO' && !s.g0.due ? true : null)}Dinheiro real (G0)</td><td class="num">${!s?.g0?.last
+          ? 'validação pendente'
+          : s.g0.last.verdict === 'APROVADO' ? `liberado · G0 aprovado em ${dmy(s.g0.last.date)}`
+          : `ainda não · paper segue normal · novo G0 em ${dmy(s.g0.next_due)}`}</td></tr>
       <tr><td>${dot(null)}Mercado</td><td class="num">${s?.breadth?.pct_above_sma50 != null ? `${nf(0).format(s.breadth.pct_above_sma50 * 100)}% acima da MM50` : '—'}</td></tr>
     </tbody></table></div>
     <div class="card"><h4>Carteira (paper)</h4>${sm ? `<table class="mini"><tbody>
