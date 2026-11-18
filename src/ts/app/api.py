@@ -208,8 +208,45 @@ def build_status(ctx: TerminalContext, now: datetime | None = None) -> dict[str,
         "breadth": _breadth_status(ctx),
         "reference_capital": s.execution.reference_capital,
         "version": _version_info(ctx),
+        "g0": g0_status(ctx, (now or datetime.now()).date()),
         "server_time": (now or datetime.now()).isoformat(timespec="seconds"),
     }
+
+
+G0_EVERY_DAYS = 90
+
+
+def g0_status(ctx: TerminalContext, today: date) -> dict[str, Any]:
+    """Latest G0 report vs the configuration in force: is a new run due (config changed, or >= 90 days)?"""
+    try:
+        from ts.core.config import load_strategy_config
+
+        _, cfg_hash = load_strategy_config(ctx.path("config/strategy.yaml"))
+    except Exception:  # noqa: BLE001 - invalid config is reported by the override banner
+        cfg_hash = ""
+    rdir = ctx.path(ctx.settings.system.reports_dir)
+    reports = []
+    for f in rdir.glob("G0_*.md") if rdir.exists() else []:
+        parts = f.stem.split("_")  # G0_<yyyy-mm-dd>_<hash>
+        try:
+            reports.append((date.fromisoformat(parts[1]), parts[2] if len(parts) > 2 else "", f))
+        except (ValueError, IndexError):
+            continue
+    same = sorted((r for r in reports if cfg_hash and cfg_hash.startswith(r[1])), key=lambda r: r[0])
+    last = same[-1] if same else None
+    out: dict[str, Any] = {"config_hash": cfg_hash[:16], "every_days": G0_EVERY_DAYS, "last": None}
+    if last is None:
+        out.update(due=True, reason="Ainda não há relatório G0 para a configuração atual (as regras mudaram).")
+        return out
+    head = last[2].read_text(encoding="utf-8", errors="replace")[:1500]
+    verdict = "APROVADO" if "APROVADO (GO)" in head or "Resultado Global do Portão G0:** APROVADO" in head else (
+        "REPROVADO" if "REPROVADO" in head else "?")
+    age = (today - last[0]).days
+    out["last"] = {"date": last[0].isoformat(), "verdict": verdict, "file": str(last[2]), "age_days": age}
+    out["next_due"] = (last[0] + timedelta(days=G0_EVERY_DAYS)).isoformat()
+    out["due"] = age >= G0_EVERY_DAYS
+    out["reason"] = (f"O último G0 foi há {age} dias (rodar a cada {G0_EVERY_DAYS})." if out["due"] else "")
+    return out
 
 
 def _latest_candidate(ctx: TerminalContext) -> dict[str, Any] | None:
@@ -521,7 +558,7 @@ def build_runs(ctx: TerminalContext) -> list[dict[str, Any]]:
 
 
 # ====================================================================================== actions
-ACTIONS = {"eod", "sync", "update", "approve", "reject"}
+ACTIONS = {"eod", "sync", "update", "approve", "reject", "g0"}
 
 
 def start_job(ctx: TerminalContext, kind: str, arg: str | None = None) -> Job:
@@ -543,6 +580,8 @@ def start_job(ctx: TerminalContext, kind: str, arg: str | None = None) -> Job:
                     args = ["eod", "--asof", ctx.last_closed_session().isoformat()]
                 elif kind in ("approve", "reject"):
                     args = ["config", kind, arg or "", "--note", "via terminal"]
+                elif kind == "g0":
+                    args = ["backtest", "--g0"]
                 else:
                     args = ["sync"]
                 env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
@@ -551,6 +590,12 @@ def start_job(ctx: TerminalContext, kind: str, arg: str | None = None) -> Job:
                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 job.code = proc.returncode
                 job.output = (proc.stdout + proc.stderr)[-4000:]
+                if kind == "g0":
+                    tail = job.output.strip().splitlines()[-1:] or [""]
+                    job.message = ("G0 APROVADO" if "APROVADO" in tail[0] and "REPROVADO" not in tail[0]
+                                   else "G0 REPROVADO" if "REPROVADO" in tail[0] else "G0 terminou") + \
+                        " — relatório na pasta reports."
+                    return
                 job.message = {0: "Concluído.", 3: "Erro: veja o Diário.", 4: "Dados insuficientes (falha segura).",
                                5: "Outra rotina está rodando; tente em alguns minutos."}.get(proc.returncode,
                                                                                             f"Código {proc.returncode}")

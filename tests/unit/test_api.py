@@ -110,6 +110,46 @@ def test_checklist_agrees_with_signal_engine(router: bool) -> None:
     assert seen > 0
 
 
+def test_g0_reminder(client: TestClient, root: Path) -> None:
+    from ts.core.config import load_strategy_config
+
+    g = client.get("/api/status").json()["g0"]
+    assert g["due"] is True and g["last"] is None  # no report for the current rules yet
+    _, h = load_strategy_config(root / "config" / "strategy.yaml")
+    rep = root / "reports"
+    rep.mkdir(exist_ok=True)
+    today = date.today()
+    (rep / f"G0_{today.isoformat()}_{h[:16]}.md").write_text(
+        "**Resultado Global do Portão G0:** REPROVADO (NO-GO)\n", encoding="utf-8")
+    (rep / "G0_2020-01-01_outrohash000000.md").write_text("old rules\n", encoding="utf-8")
+    g = client.get("/api/status").json()["g0"]
+    assert g["due"] is False and g["last"]["verdict"] == "REPROVADO" and g["last"]["age_days"] == 0
+    (rep / f"G0_{today.isoformat()}_{h[:16]}.md").rename(rep / f"G0_2020-01-01_{h[:16]}.md")
+    g = client.get("/api/status").json()["g0"]
+    assert g["due"] is True and "dias" in g["reason"]
+    assert client.post("/api/actions/g0").status_code == 403  # still token-protected
+
+
+def test_desktop_survives_pythonw_without_console(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The desktop shortcut runs pythonw: no stdout/stderr -> uvicorn's logging used to crash before the window."""
+    import sys
+
+    from ts.app.desktop import ensure_streams
+
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    log = ensure_streams(tmp_path)
+    assert log is not None and sys.stdout is not None and sys.stderr is not None
+    import uvicorn
+
+    from ts.app.api import create_app
+
+    uvicorn.Config(create_app(tmp_path, settings=Settings()), log_level="warning", log_config=None)  # must not raise
+    sys.stderr.write("ok\n")
+    sys.stderr.flush()
+    assert "ok" in log.read_text(encoding="utf-8")
+
+
 def test_empty_terminal_tabs(client: TestClient) -> None:
     assert client.get("/api/positions").json() == []
     assert client.get("/api/orders").json() == []

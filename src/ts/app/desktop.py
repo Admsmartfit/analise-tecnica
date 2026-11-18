@@ -7,6 +7,7 @@ opens another window on the running instance.
 from __future__ import annotations
 
 import socket
+import sys
 import threading
 import time
 import urllib.request
@@ -43,7 +44,23 @@ def _open_window(url: str) -> bool:
         return False
 
 
+def ensure_streams(root: Path) -> Path | None:
+    """Under ``pythonw`` (the desktop shortcut) sys.stdout/sys.stderr are None and uvicorn's logging setup
+    crashes before the window opens ("Unable to configure formatter 'default'"). Send them to logs/ui.log."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return None
+    log = root / "logs" / "ui.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    f = open(log, "a", encoding="utf-8", buffering=1)  # noqa: SIM115 - lives for the whole process
+    if sys.stdout is None:
+        sys.stdout = f
+    if sys.stderr is None:
+        sys.stderr = f
+    return log
+
+
 def run_ui(root: Path | None = None, port: int = DEFAULT_PORT, window: bool = True) -> int:
+    ensure_streams(root or Path.cwd())
     url = f"http://127.0.0.1:{port}/"
     if _running(port):
         if not (window and _open_window(url)):
@@ -57,7 +74,9 @@ def run_ui(root: Path | None = None, port: int = DEFAULT_PORT, window: bool = Tr
     from ts.app.api import create_app
 
     app = create_app(root or Path.cwd())
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False))
+    # log_config=None: keep the app's own logging (uvicorn's colour formatter probes the console)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False,
+                                           log_config=None))
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
     for _ in range(100):

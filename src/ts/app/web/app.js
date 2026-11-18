@@ -547,7 +547,8 @@ function renderEquity(body, data) {
 
 function bindEmptyActions() {
   for (const b of $$('[data-act]')) {
-    b.onclick = () => runAction(b.dataset.act, b.dataset.act === 'eod' ? 'Rodando o EOD (sync, sinais, simulação)…' : 'Baixando cotações…');
+    const label = { eod: 'Rodando o EOD (sync, sinais, simulação)…', g0: 'Rodando o G0 (leva alguns minutos)…' }[b.dataset.act] || 'Baixando cotações…';
+    b.onclick = () => runAction(b.dataset.act, label);
   }
 }
 
@@ -564,6 +565,7 @@ function nextStep(s) {
   if (!s.data.last_bar) return { cls: 'warn', title: 'Baixe as cotações', text: 'Sem histórico ainda (1–3 min).', act: 'sync', label: 'Baixar cotações' };
   if (cand && cand.status === 'PENDING') return { cls: 'warn', title: 'Revise a configuração candidata', text: 'A reotimização terminou e espera sua decisão.', cand: true };
   if (s.eod_pending) return { cls: 'warn', title: `Processe o pregão ${dmy(s.data.last_closed_session)}`, text: 'O EOD de hoje ainda não rodou (ele roda sozinho às 19:30).', act: 'eod', label: 'Rodar o EOD agora' };
+  if (s.g0?.due) return { cls: 'warn', title: 'Hora de rodar o G0', text: `${esc(s.g0.reason)} Leva alguns minutos; o relatório vai para a pasta reports.`, act: 'g0', label: 'Rodar o G0 agora' };
   if (s.version?.update_available) return { cls: '', title: 'Há uma atualização', text: 'Instale quando quiser; os testes rodam antes e há volta automática.', upd: true };
   if (q.active) return { cls: 'warn', title: 'Sistema em quarentena', text: `${esc(q.reason || '')} — sem entradas novas; saídas seguem normais.` };
   const n = s.next_event;
@@ -584,7 +586,7 @@ async function renderToday(body) {
   const accepted = sig.items.filter((x) => x.disposition === 'ACCEPTED');
   body.innerHTML = `<div class="today">
     <div class="card next ${ns.cls}"><h4>Próximo passo</h4><div class="big">${ns.title}</div><div class="note">${ns.text}</div>
-      ${ns.act ? `<div><button class="primary" data-act="${ns.act}">${ico(ns.act === 'eod' ? 'play' : 'download')} ${ns.label}</button></div>` : ''}
+      ${ns.act ? `<div><button class="primary" data-act="${ns.act}">${ico(ns.act === 'sync' ? 'download' : 'play')} ${ns.label}</button></div>` : ''}
       ${ns.cand ? '<div><button class="primary" id="today-cand">Revisar candidata</button></div>' : ''}
       ${ns.upd ? '<div><button class="primary" id="today-upd">Ver atualização</button></div>' : ''}</div>
     <div class="card"><h4>Saúde do sistema</h4><table class="mini"><tbody>
@@ -592,6 +594,8 @@ async function renderToday(body) {
       <tr><td>${dot(s?.last_eod ? s.last_eod.status === 'OK' : null)}Último EOD</td><td class="num">${s?.last_eod ? `${dmy(s.last_eod.session_date)} · ${esc(s.last_eod.status)}` : 'nenhum'}</td></tr>
       <tr><td>${dot(true)}Fonte</td><td class="num">${esc(s?.connection.label || '—')}</td></tr>
       <tr><td>${dot(!(s?.quarantine || {}).active)}Proteções</td><td class="num">${(s?.quarantine || {}).active ? 'quarentena' : (s?.circuit_breaker || {}).level ? `circuit breaker ${s.circuit_breaker.level}` : 'normais'}</td></tr>
+      <tr><td>${dot(s?.g0?.last ? (s.g0.due ? null : s.g0.last.verdict === 'APROVADO') : null)}Validação G0</td><td class="num" title="${esc(s?.g0?.last?.file || '')}">${s?.g0?.last
+        ? `${esc(s.g0.last.verdict)} em ${dmy(s.g0.last.date)} · próximo ${dmy(s.g0.next_due)}` : 'pendente para as regras atuais'}</td></tr>
       <tr><td>${dot(null)}Mercado</td><td class="num">${s?.breadth?.pct_above_sma50 != null ? `${nf(0).format(s.breadth.pct_above_sma50 * 100)}% acima da MM50` : '—'}</td></tr>
     </tbody></table></div>
     <div class="card"><h4>Carteira (paper)</h4>${sm ? `<table class="mini"><tbody>
@@ -690,6 +694,8 @@ function commands() {
       run: () => runAction('eod', 'Rodando o EOD (sync, sinais, simulação)…'), keys: 'eod fim do dia processar rodar' },
     { grp: 'Ação', label: 'Baixar cotações', sub: 'sync', icon: 'download', run: () => runAction('sync', 'Baixando cotações…'), keys: 'sync cotacoes baixar dados' },
     { grp: 'Ação', label: 'Recarregar a tela', sub: 'R', icon: 'refresh', run: refreshAll, keys: 'atualizar recarregar refresh' },
+    { grp: 'Ação', label: 'Rodar o G0 (validação)', sub: s.g0?.last ? `último ${dmy(s.g0.last.date)}` : 'pendente', icon: 'play',
+      run: () => runAction('g0', 'Rodando o G0 (leva alguns minutos)…'), keys: 'g0 go validacao backtest portao' },
   ];
   if (s.version?.update_available) cmds.push({ grp: 'Ação', label: 'Instalar atualização', icon: 'refresh', run: () => $('#st-update').click(), keys: 'update versao' });
   for (const [k, v] of Object.entries(TAB_NAMES)) {
