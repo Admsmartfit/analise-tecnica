@@ -259,7 +259,8 @@ def test_migrations_idempotent_and_backup_routine_allowed(tmp_path: Path) -> Non
                  "VALUES ('r','backup','2026-01-02','x','OK','h','v')")
     mem = get_connection(":memory:")
     apply_migrations(mem)
-    assert mem.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 3
+    n_files = len(list((Path(__file__).resolve().parents[2] / "src" / "ts" / "persistence" / "migrations").glob("*.sql")))
+    assert n_files >= 4 and mem.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == n_files
 
 
 def test_process_lock_is_exclusive(tmp_path: Path) -> None:

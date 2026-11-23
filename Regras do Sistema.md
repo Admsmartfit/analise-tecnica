@@ -194,6 +194,27 @@ pregões acima do IBOV) e aceita enquanto todos os limites abaixo forem respeita
 - **Custos considerados:** taxas B3 0,03% por ordem + 0,05% de escorregamento; corretagem zero.
 - **IR:** 15% sobre o lucro mensal de swing trade; isento quando as vendas de ações do mês ficam até R$ 20.000.
 
+### 7.1 Filtro fundamentalista: o Cérebro (TradingAgents B3) — opcional
+
+Quando a integração está ligada (`cerebro.enabled`), toda **compra nova** precisa também da autorização do
+Cérebro, que analisa os fundamentos da empresa (especificação: `INTEGRACAO_ROBO_TECNICO.md`).
+
+| Passo | Quando | O que acontece |
+| --- | --- | --- |
+| Pedido de análise | Fim do EOD (19:30) | Para cada compra planejada para amanhã sem autorização válida, o sistema pede análise ao Cérebro (prioridade alta) |
+| Decisão | Segundos a ~1 min depois | O Cérebro responde pelo webhook: **autorizado**, **rejeitado** ou **pausa** (dados indisponíveis), com convicção e validade em dias |
+| Compra | Leilão de abertura (10:00) | Só executa se houver **"autorizado" ainda válido às 10:00** daquele dia. Decisões que chegaram depois das 10:00 não contam para aquele pregão |
+| Resultado | Quando o trade fecha | O sistema informa ao Cérebro o resultado (ganho/perda, %, motivo da saída) para ele aprender |
+
+- O Cérebro **só veta ou libera compras** que as regras técnicas já escolheram. Ele não cria ordens e não mexe em
+  stops, alvos ou saídas de posições abertas.
+- Sem decisão válida (Cérebro desligado, fora do ar ou atrasado) → a compra **não acontece** (falha segura).
+  No modo `advisory` (consultivo) ela acontece e o sistema só avisa.
+- O backtest e o G0 **não** usam o Cérebro: não existe histórico de decisões dele. O efeito do filtro só pode ser
+  medido no paper.
+- Ver na tela: coluna **Fund.** no Market Watch (✓ libera · ✗ rejeitado/vencido · ⏸ pausa · — sem análise), cartão
+  **Cérebro** no Raio-X (tese, indicadores, botão "Pedir análise agora") e linha **Cérebro** em "Saúde do sistema".
+
 ---
 
 ## 8. Quando vender

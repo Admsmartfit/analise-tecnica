@@ -16,7 +16,8 @@ $python = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { throw "Python of the virtual environment not found: $python" }
 
 # TS_Sync is NOT registered: the EOD routine already syncs, and two routines at 19:30 would compete for MT5.
-$tasks = @("TS_PreOpen", "TS_Watchdog", "TS_EOD", "TS_DeadMan", "TS_Backup")
+# TS_Cerebro: webhook of the TradingAgents integration; exits at once while cerebro.enabled=false.
+$tasks = @("TS_PreOpen", "TS_Watchdog", "TS_EOD", "TS_DeadMan", "TS_Backup", "TS_Cerebro")
 if (-not $NoUpdateTask) { $tasks += "TS_Update" }
 
 foreach ($t in $tasks) {

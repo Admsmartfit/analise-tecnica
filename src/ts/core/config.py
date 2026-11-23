@@ -66,6 +66,30 @@ class TelegramSettings(BaseModel):
     keyring_service: str = "ts-telegram"
 
 
+class CerebroSettings(BaseModel):
+    """Integração com o TradingAgents B3 ("Cérebro" fundamentalista) — ver INTEGRACAO_ROBO_TECNICO.md.
+
+    O Cérebro só pode VETAR ou LIBERAR compras que as regras técnicas já escolheram; nunca cria ordens.
+    Configure em config/settings.local.yaml (fora do git) ou com `python -m ts cerebro config`.
+    """
+
+    enabled: bool = False
+    base_url: str = "http://localhost:8000"
+    # Webhook ② (recebe as decisões). 127.0.0.1 = só o próprio PC; para outra máquina use 0.0.0.0 + allowed_ips.
+    webhook_host: str = "127.0.0.1"
+    webhook_port: int = 5000
+    webhook_path: str = "/webhook/decisao"
+    allowed_ips: list[str] = Field(default_factory=lambda: ["127.0.0.1", "::1"])
+    # required = só compra com decisão "autorizado" válida na abertura; advisory = só registra (não bloqueia).
+    mode: Literal["required", "advisory"] = "required"
+    min_conviccao: float = 0.0
+    allow_contingency: bool = True  # aceitar autorizações da "Regra de contingência (sem IA)"
+    demand_priority: Literal["normal", "alta", "urgente"] = "alta"
+    send_feedback: bool = True
+    demand_timeout_s: float = 10.0
+    feedback_timeout_s: float = 90.0
+
+
 class Settings(BaseModel):
     system: SystemSettings = Field(default_factory=SystemSettings)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
@@ -73,6 +97,7 @@ class Settings(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     data: DataSettings = Field(default_factory=DataSettings)
+    cerebro: CerebroSettings = Field(default_factory=CerebroSettings)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

@@ -158,6 +158,12 @@ kbd { font: 11px/1 var(--font); padding: 2px 5px; border: 1px solid var(--line);
 .palette-foot { padding: 8px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .keys td { padding: 5px 10px 5px 0; } .keys td:first-child { white-space: nowrap; }
 
+/* ---------------------------------------------------------------- Cérebro (fundamentos) */
+.fund-col { text-align: center; width: 44px; }
+.no-brain .fund-col { display: none; }
+.fund { font-weight: 700; } .fund.ok { color: var(--ok); } .fund.no { color: var(--danger); }
+.fund.warn { color: var(--warn); } .fund.none { color: var(--muted); font-weight: 400; }
+
 /* ---------------------------------------------------------------- versão / atualizações */
 .ver-btn { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
 #dlg-update { width: min(620px, 92vw); }

@@ -297,6 +297,9 @@ class SessionEngine:
         self.breakeven_cost_pct = 2.0 * (self.costs.b3_emoluments_pct + self.costs.slippage_pct)
         self._params: dict[str, ExitParams] = {}
         self._breadth_cache: tuple[tuple[int, int], pd.DataFrame] | None = None
+        # External veto on NEW buys (TradingAgents "Cérebro"): (ticker, session) -> None to allow, or the reason
+        # to block. Set only by the paper/live routines; backtests never use it (no historical decisions).
+        self.entry_gate: Callable[[str, date], str | None] | None = None
 
     # ------------------------------------------------------------------ helpers
     def exit_params(self, setup: str) -> ExitParams:
@@ -395,6 +398,11 @@ class SessionEngine:
             if o.ticker in book:
                 res.expired.append((o, "position already open"))
                 continue
+            if self.entry_gate is not None and not o.is_shadow and o.side == "BUY":
+                veto = self.entry_gate(o.ticker, d)
+                if veto:
+                    res.expired.append((o, veto))
+                    continue
             fill: float | None = None
             if o.kind == "OPEN_AUCTION":
                 if o.limit_price is not None and b["open"] > o.limit_price:

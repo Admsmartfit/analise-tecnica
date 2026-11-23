@@ -164,6 +164,7 @@ async function loadStatus() {
     ? `Amplitude: <b>${nf(0).format(br.pct_above_sma50 * 100)}% acima da MM50</b> · Roteador: <b>${br.router_enabled ? 'ligado' : 'desligado'}</b>` : '';
   $('#st-breadth').title = 'Parcela das ações do universo fechando acima da média de 50 dias (força interna do mercado).';
   renderVersionBadge(s.version || {});
+  document.body.classList.toggle('no-brain', !s.cerebro?.enabled);  // hides the "Fund." column
   renderBanner(s);
 }
 
@@ -303,7 +304,8 @@ function passFilters(r) {
 
 function renderWatch() {
   const { key, dir } = state.sort;
-  const val = (r) => (key === 'fav' ? (state.favs.has(r.ticker) ? 0 : 1) : key === 'signal' ? ({ accepted: 0, rejected: 1 }[r.signal] ?? 2) : r[key]);
+  const val = (r) => (key === 'fav' ? (state.favs.has(r.ticker) ? 0 : 1) : key === 'signal' ? ({ accepted: 0, rejected: 1 }[r.signal] ?? 2)
+    : key === 'cerebro' ? (r.cerebro ? (r.cerebro.libera_compra ? 0 : 1) : 2) : r[key]);
   const rows = state.watch.filter((r) => r.is_index || passFilters(r)).sort((a, b) => {
     if (a.is_index !== b.is_index) return a.is_index ? -1 : 1;
     const x = val(a), y = val(b);
@@ -312,7 +314,7 @@ function renderWatch() {
     return (x > y ? 1 : -1) * dir;
   });
   $('#watch-table tbody').innerHTML = rows.map((r) => {
-    if (!r.has_data) return `<tr data-t="${r.ticker}" class="stale"><td></td><td>${r.ticker}</td><td colspan="6" class="muted">sem cotações</td></tr>`;
+    if (!r.has_data) return `<tr data-t="${r.ticker}" class="stale"><td></td><td>${r.ticker}</td><td colspan="7" class="muted">sem cotações</td></tr>`;
     const chg = r.change_pct === null ? '—' : `<span class="${r.change_pct >= 0 ? 'up' : 'down'}">${pct(r.change_pct)}</span>`;
     const trend = r.trend ? `<span class="trend ${r.trend}" title="${r.trend === 'up' ? 'Fechamento acima da média de 200 dias' : 'Abaixo da média de 200 dias'}">${r.trend === 'up' ? 'Alta' : 'Baixa'}</span>` : '—';
     const sig = r.signal ? `<span class="sig ${r.signal}" title="${esc(r.signals.map((s) => `${s.setup_name}: ${s.result}${s.reason ? ' — ' + s.reason : ''}`).join('\n'))}">${r.signal === 'accepted' ? 'aceito' : 'recusado'}</span>` : '';
@@ -321,8 +323,43 @@ function renderWatch() {
       <td>${r.ticker}${r.held ? `<span class="held-ico" title="Em carteira">${ico('briefcase')}</span>` : ''}</td>
       <td class="num">${fmt(r.last, r.is_index ? 0 : 2)}</td><td class="num">${chg}</td>
       <td>${trend}</td><td title="${esc(PHASE_HINT[r.phase] || '')}">${r.phase ? `${r.phase} ${esc(r.phase_name)}` : '—'}</td>
-      <td class="num">${r.atr_pct === null ? '—' : nf(1).format(r.atr_pct * 100)}</td><td>${sig}</td></tr>`;
+      <td class="num">${r.atr_pct === null ? '—' : nf(1).format(r.atr_pct * 100)}</td><td>${sig}</td>
+      <td class="fund-col">${r.is_index ? '' : brainMark(r.cerebro)}</td></tr>`;
   }).join('');
+}
+
+// Cérebro (TradingAgents): decisão fundamentalista por ativo
+function brainMark(c) {
+  if (!state.status?.cerebro?.enabled) return '';
+  if (!c) return '<span class="fund none" title="Sem análise do Cérebro">—</span>';
+  const mk = c.libera_compra ? '✓' : c.status === 'pausa_analise' ? '⏸' : '✗';
+  const cls = c.libera_compra ? 'ok' : c.status === 'pausa_analise' ? 'warn' : 'no';
+  return `<span class="fund ${cls}" title="${esc(c.motivo)}">${mk}</span>`;
+}
+
+async function renderBrain(t) {
+  const el = $('#brain'); if (!el) return;
+  if (!state.status?.cerebro?.enabled) { el.innerHTML = ''; return; }
+  let d;
+  try { d = await api(`/api/cerebro/${encodeURIComponent(t)}`); } catch (e) { el.innerHTML = ''; return; }
+  if (state.selected !== t) return;
+  const a = d.atual;
+  const ind = a ? Object.entries(a.indicadores || {}).filter(([k]) => ['PL', 'PVP', 'DY_pct', 'ROE_pct', 'ROIC_pct', 'EV_EBITDA', 'Div_Liq_Patrimonio', 'Margem_Liquida_pct'].includes(k)) : [];
+  const lab = { PL: 'P/L', PVP: 'P/VP', DY_pct: 'DY %', ROE_pct: 'ROE %', ROIC_pct: 'ROIC %', EV_EBITDA: 'EV/EBITDA', Div_Liq_Patrimonio: 'Dív.líq./PL', Margem_Liquida_pct: 'Margem líq. %' };
+  const head = !a ? '<p class="note">Ainda sem análise do Cérebro para este ativo.</p>'
+    : `<div class="check ${a.libera_compra ? 'ok' : 'no'}"><span><b>${esc(a.motivo)}</b></span></div>
+       <p class="note">${esc(a.tese || '')}</p>
+       ${ind.length ? `<dl class="kv">${ind.map(([k, v]) => `<dt>${lab[k]}</dt><dd>${typeof v === 'number' ? fmt(v) : esc(v)}</dd>`).join('')}</dl>` : ''}
+       <p class="note">Decidido por ${esc(a.origem || '—')} em ${esc((a.autorizado || '').slice(0, 16).replace('T', ' '))} UTC${a.fontes ? ` · fontes: ${esc(a.fontes)}` : ''}</p>`;
+  el.innerHTML = `<div class="card"><h4>Cérebro (fundamentos)${d.mode === 'advisory' ? ' · consultivo' : ''}</h4>${head}
+    <div><button type="button" id="brain-ask">${ico('refresh')} Pedir análise agora</button></div></div>`;
+  $('#brain-ask').onclick = async () => {
+    try {
+      const r = await api(`/api/cerebro/demand?ticker=${encodeURIComponent(t)}`, { method: 'POST' });
+      toast(r.message, r.ok ? 'ok' : 'err');
+      setTimeout(() => { if (state.selected === t) renderBrain(t); }, 20000);
+    } catch (e) { toast(e.message, 'err'); }
+  };
 }
 
 function setupWatch() {
@@ -507,9 +544,12 @@ function renderInspector() {
   const key = `${w.ticker}|${w.last_date}`;
   const keep = body.dataset.key === key ? $('#checklist')?.innerHTML : null;  // refresh periódico sem piscar
   body.innerHTML = ''; body.dataset.key = key;
+  const keepBrain = body.dataset.key === key ? $('#brain')?.innerHTML : null;
   renderInspectorSummary(body, w);
   if (w.is_index || !w.has_data) return;
-  body.insertAdjacentHTML('beforeend', '<div id="checklist"></div>');
+  body.insertAdjacentHTML('beforeend', '<div id="brain"></div><div id="checklist"></div>');
+  renderBrain(w.ticker).catch(() => {});  // cheap; refreshes the decision when a webhook arrives
+  if (keepBrain) $('#brain').innerHTML = keepBrain;
   if (keep) $('#checklist').innerHTML = keep; else renderChecklist(w.ticker);
 }
 
@@ -629,6 +669,9 @@ async function renderToday(body) {
       <tr><td>${dot(s && !s.data.stale)}Dados</td><td class="num">${s?.data.last_bar ? dmy(s.data.last_bar) : 'sem cotações'}</td></tr>
       <tr><td>${dot(s?.last_eod ? s.last_eod.status === 'OK' : null)}Último EOD</td><td class="num">${s?.last_eod ? `${dmy(s.last_eod.session_date)} · ${esc(s.last_eod.status)}` : 'nenhum'}</td></tr>
       <tr><td>${dot(true)}Fonte</td><td class="num">${esc(s?.connection.label || '—')}</td></tr>
+      ${s?.cerebro?.enabled ? `<tr title="Webhook: ${esc(s.cerebro.webhook_url)} · Cérebro: ${esc(s.cerebro.base_url)}${s.cerebro.last_error ? ` · último erro: ${esc(s.cerebro.last_error.error)}` : ''}">
+        <td>${dot(s.cerebro.listener_alive && !(s.cerebro.outbox || {}).failed ? true : s.cerebro.listener_alive ? null : false)}Cérebro (fundamentos)</td>
+        <td class="num">${s.cerebro.listener_alive ? 'conectado' : 'webhook parado'} · ${s.cerebro.authorized_now ?? 0} autorizado(s)${(s.cerebro.outbox || {}).pending ? ` · ${s.cerebro.outbox.pending} na fila` : ''}${(s.cerebro.outbox || {}).failed ? ` · ${s.cerebro.outbox.failed} falha(s)` : ''}${s.cerebro.mode === 'advisory' ? ' · consultivo' : ''}</td></tr>` : ''}
       <tr><td>${dot(!(s?.quarantine || {}).active)}Proteções</td><td class="num">${(s?.quarantine || {}).active ? 'quarentena' : (s?.circuit_breaker || {}).level ? `circuit breaker ${s.circuit_breaker.level}` : 'normais'}</td></tr>
       <tr title="O G0 decide só se o sistema pode ir para DINHEIRO REAL. O paper (simulação) opera normalmente em qualquer resultado.${s?.g0?.last ? ` Relatório: ${esc(s.g0.last.file)}` : ''}">
         <td>${dot(s?.g0?.last?.verdict === 'APROVADO' && !s.g0.due ? true : null)}Dinheiro real (G0)</td><td class="num">${!s?.g0?.last
@@ -653,7 +696,10 @@ async function renderToday(body) {
     }).join('')}</tbody></table>` : '<p class="note">Nenhuma posição aberta.</p>'}</div>
     <div class="card"><h4>Ordens para o próximo pregão · ${active.length}</h4>${active.length ? `<table class="mini"><tbody>${active.map((o) => `
       <tr data-t="${esc(o.ticker)}"><td><b>${esc(o.ticker)}</b> ${o.side === 'BUY' ? 'compra' : 'venda'} ${nf(0).format(o.qty)}</td>
-        <td class="muted">${esc(o.kind_pt)}</td><td class="num">${o.price ? fmt(o.price) : 'a mercado'}</td></tr>`).join('')}</tbody></table>`
+        <td class="muted">${esc(o.kind_pt)}</td><td class="num">${o.price ? fmt(o.price) : 'a mercado'}</td>
+        <td>${o.side === 'BUY' ? brainMark((state.watch.find((w) => w.ticker === o.ticker) || {}).cerebro) : ''}</td></tr>`).join('')}</tbody></table>
+        ${state.status?.cerebro?.enabled && state.status.cerebro.mode === 'required' && active.some((o) => o.side === 'BUY')
+          ? '<p class="note">Compras só executam com ✓ do Cérebro na abertura (pedido automático no fim do EOD).</p>' : ''}`
       : '<p class="note">Nenhuma ordem programada.</p>'}</div>
     <div class="card"><h4>Sinais do último pregão${sig.date ? ` · ${dmy(sig.date)}` : ''}</h4>${sig.items.length
       ? `<p class="note">${accepted.length} aceito(s) de ${sig.items.length}.</p><table class="mini"><tbody>${sig.items.slice(0, 8).map((x) => `

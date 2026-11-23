@@ -129,7 +129,9 @@ class TerminalContext:
         d = self.store.data_dir
         files = list(d.glob("*.parquet")) if d.exists() else []
         db = self.path(self.settings.system.db_path)
-        return (max((f.stat().st_mtime for f in files), default=0.0), db.stat().st_mtime if db.exists() else 0.0)
+        wal = db.with_name(db.name + "-wal")  # WAL mode: new rows (e.g. Cérebro webhooks) land here first
+        return (max((f.stat().st_mtime for f in files), default=0.0),
+                max(db.stat().st_mtime if db.exists() else 0.0, wal.stat().st_mtime if wal.exists() else 0.0))
 
     # ------------------------------------------------------------------ calendar helpers
     def last_closed_session(self, now: datetime | None = None) -> date:
@@ -209,8 +211,57 @@ def build_status(ctx: TerminalContext, now: datetime | None = None) -> dict[str,
         "reference_capital": s.execution.reference_capital,
         "version": _version_info(ctx),
         "g0": g0_status(ctx, (now or datetime.now()).date()),
+        "cerebro": cerebro_status(ctx),
         "server_time": (now or datetime.now()).isoformat(timespec="seconds"),
     }
+
+
+def _ro_conn(ctx: TerminalContext) -> sqlite3.Connection | None:
+    db = ctx.path(ctx.settings.system.db_path)
+    if not db.exists():
+        return None
+    return sqlite3.connect(f"file:{db.resolve()}?mode=ro", uri=True, check_same_thread=False)
+
+
+def cerebro_status(ctx: TerminalContext) -> dict[str, Any]:
+    from ts.app import cerebro as cb
+
+    cfg = ctx.settings.cerebro
+    if not cfg.enabled:
+        return {"enabled": False}
+    c = _ro_conn(ctx)
+    try:
+        return cb.status(c, cfg)
+    finally:
+        if c is not None:
+            c.close()
+
+
+def cerebro_decisions_now(ctx: TerminalContext) -> dict[str, dict[str, Any]]:
+    """Latest decision per ticker known now, with whether it authorizes a buy at the next open."""
+    from ts.app import cerebro as cb
+
+    cfg = ctx.settings.cerebro
+    if not cfg.enabled:
+        return {}
+    now = cb.utcnow()
+    df = ctx.query(
+        "SELECT id_analise, ativo, status, conviccao, data_expiracao, data_autorizacao, origem_decisao, tese, "
+        "indicadores_json, fontes, validade_dias FROM cerebro_decisions d WHERE id_analise = "
+        "(SELECT MAX(id_analise) FROM cerebro_decisions WHERE ativo=d.ativo AND data_autorizacao <= ?)",
+        (cb._iso(now),))
+    nxt = ctx.calendar.next_session(ctx.last_closed_session())
+    at = cb.session_open_utc(nxt)
+    out = {}
+    for r in df.to_dict(orient="records") if not df.empty else []:
+        ok, why = cb.evaluate(r, at, cfg)
+        out[r["ativo"]] = {
+            "status": r["status"], "conviccao": r["conviccao"], "expira": r["data_expiracao"],
+            "autorizado": r["data_autorizacao"], "origem": r["origem_decisao"], "tese": r["tese"],
+            "fontes": r["fontes"], "indicadores": json.loads(r["indicadores_json"] or "{}"),
+            "libera_compra": ok, "motivo": why, "proximo_pregao": nxt.isoformat(), "id": r["id_analise"],
+        }
+    return out
 
 
 G0_EVERY_DAYS = 90
@@ -356,6 +407,7 @@ def build_watchlist(ctx: TerminalContext) -> list[dict[str, Any]]:
                         "WHERE decision_date = (SELECT MAX(decision_date) FROM signals)")
         pos = ctx.query("SELECT ticker FROM positions WHERE status IN ('OPEN','PARTIAL') AND is_shadow=0")
         held = set(pos["ticker"]) if not pos.empty else set()
+        brain = cerebro_decisions_now(ctx)
         rows: list[dict[str, Any]] = []
         for t in tickers:
             if not store.exists(t):
@@ -391,6 +443,8 @@ def build_watchlist(ctx: TerminalContext) -> list[dict[str, Any]]:
                      "result": DISPOSITION_PT.get(r.disposition, r.disposition), "reason": r.reason,
                      "date": r.decision_date} for r in tsig.itertuples()],
                 "held": t in held,
+                "cerebro": None if t not in brain else {k: brain[t][k] for k in
+                                                        ("status", "conviccao", "expira", "libera_compra", "motivo")},
             })
         return [{k: _clean(v) for k, v in r.items()} for r in rows]
 
@@ -686,6 +740,39 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
             _store_version(ctx, info)
             return info
         return _version_info(ctx)
+
+    @app.get("/api/cerebro/{ticker}")
+    def cerebro_ticker(ticker: str) -> dict[str, Any]:
+        from ts.app.cerebro import norm_ticker
+
+        t = norm_ticker(ticker)
+        hist = ctx.query("SELECT id_analise, status, conviccao, data_autorizacao, data_expiracao, origem_decisao "
+                         "FROM cerebro_decisions WHERE ativo=? ORDER BY id_analise DESC LIMIT 6", (t,))
+        return {"enabled": ctx.settings.cerebro.enabled, "mode": ctx.settings.cerebro.mode, "ticker": t,
+                "atual": cerebro_decisions_now(ctx).get(t), "historico": _records(hist) if not hist.empty else []}
+
+    @app.post("/api/cerebro/demand")
+    def cerebro_demand(ticker: str, x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:
+        check_token(x_ts_token)
+        from ts.app import cerebro as cb
+        from ts.persistence.db import DatabaseManager
+
+        cfg = ctx.settings.cerebro
+        if not cfg.enabled:
+            raise HTTPException(409, "Integração com o Cérebro desligada (python -m ts cerebro config --enable)")
+        t = cb.norm_ticker(ticker)
+        if not t.isalnum() or len(t) > 12:
+            raise HTTPException(400, "Ativo inválido")
+        db = DatabaseManager(ctx.path(ctx.settings.system.db_path))
+        try:
+            conn = db.get_conn()
+            cb.enqueue_demand(conn, [t], "urgente")
+            res = cb.flush_outbox(conn, cfg, budget_s=15)
+        finally:
+            db.close()
+        if res["sent"]:
+            return {"ok": True, "message": f"Análise de {t} pedida ao Cérebro; a decisão chega em alguns segundos a ~1 min."}
+        return {"ok": False, "message": f"Cérebro não respondeu agora; o pedido de {t} fica na fila e é reenviado sozinho."}
 
     @app.get("/api/checklist/{ticker}")
     def checklist(ticker: str) -> dict[str, Any]:

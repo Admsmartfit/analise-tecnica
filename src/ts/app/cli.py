@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import platform
 import shutil
 import struct
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
@@ -321,6 +323,53 @@ def ui_command(args: argparse.Namespace) -> int:
     return run_ui(port=args.port, window=not args.browser)
 
 
+def cerebro_command(args: argparse.Namespace) -> int:
+    """Integração com o TradingAgents B3 (Cérebro): serve | status | demand | flush | retry | config."""
+    from ts.app import cerebro as cb
+
+    if args.action == "config":
+        updates: dict[str, Any] = {"base_url": args.url, "mode": args.mode, "webhook_port": args.port,
+                                   "webhook_host": args.host, "min_conviccao": args.min_conviccao}
+        if args.enable:
+            updates["enabled"] = True
+        if args.disable:
+            updates["enabled"] = False
+        p = cb.write_local_config(Path("config"), updates)
+        console.print(f"Configuração gravada em {p} (fora do git; sobrevive às atualizações).")
+        console.print("Reinicie o serviço do webhook para aplicar: tarefa agendada TS_Cerebro "
+                      "(ou `python -m ts cerebro serve`).")
+        return 0
+    settings = load_settings()
+    if args.action == "serve":
+        return cb.serve(settings, Path.cwd())
+    db = DatabaseManager(settings.system.db_path)
+    conn = db.get_conn()
+    cfg = settings.cerebro
+    if args.action == "demand":
+        if not args.tickers:
+            console.print("[red]Informe ao menos um ativo: python -m ts cerebro demand PETR4 VALE3[/red]")
+            return 2
+        ativos = cb.enqueue_demand(conn, args.tickers, args.prioridade or cfg.demand_priority)
+        res = cb.flush_outbox(conn, cfg, budget_s=30)
+        console.print(f"Pedido de análise para {', '.join(ativos)}: {res}")
+        return 0 if not res["failed"] else 3
+    if args.action == "flush":
+        console.print(cb.flush_outbox(conn, cfg, budget_s=600))
+        return 0
+    if args.action == "retry":
+        console.print(f"{cb.retry_failed(conn)} envio(s) devolvido(s) à fila; enviando…")
+        console.print(cb.flush_outbox(conn, cfg, budget_s=600))
+        return 0
+    st = cb.status(conn, cfg)
+    console.print(json.dumps(st, ensure_ascii=False, indent=2))
+    rows = conn.execute(
+        "SELECT ativo, status, conviccao, data_expiracao, origem_decisao FROM cerebro_decisions d WHERE id_analise = "
+        "(SELECT MAX(id_analise) FROM cerebro_decisions WHERE ativo=d.ativo) ORDER BY ativo").fetchall()
+    for r in rows:
+        console.print(f"{r[0]:<7} {r[1]:<14} {r[2]:>4.0%}  até {r[3][:16]} UTC  {r[4] or ''}")
+    return 0
+
+
 def notify_command(args: argparse.Namespace) -> int:
     from ts.app.notify import send_telegram
 
@@ -515,8 +564,23 @@ def main() -> None:
     nt_p = subparsers.add_parser("notify", help="Send a Telegram message (used by the updater)")
     nt_p.add_argument("message", type=str)
 
+    cb_p = subparsers.add_parser("cerebro", help="Integração com o TradingAgents B3 (Cérebro fundamentalista)")
+    cb_p.add_argument("action", choices=["status", "serve", "demand", "flush", "retry", "config"], nargs="?",
+                      default="status")
+    cb_p.add_argument("tickers", nargs="*", help="demand: ativos a analisar")
+    cb_p.add_argument("--prioridade", choices=["normal", "alta", "urgente"])
+    cb_p.add_argument("--url", help="config: endereço do Cérebro, ex. http://localhost:8000")
+    cb_p.add_argument("--mode", choices=["required", "advisory"], help="config: required bloqueia; advisory só avisa")
+    cb_p.add_argument("--port", type=int, help="config: porta do webhook (padrão 5000)")
+    cb_p.add_argument("--host", help="config: 127.0.0.1 (só este PC) ou 0.0.0.0 (rede local)")
+    cb_p.add_argument("--min-conviccao", type=float, dest="min_conviccao")
+    cb_p.add_argument("--enable", action="store_true")
+    cb_p.add_argument("--disable", action="store_true")
+
     args = parser.parse_args()
 
+    if args.command == "cerebro":
+        sys.exit(cerebro_command(args))
     if args.command == "corp-actions":
         sys.exit(corp_actions_command(args))
     if args.command == "universe-update":

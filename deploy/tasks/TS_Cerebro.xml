@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>TradingSystem</Author>
+    <Description>Serviço do webhook do Cérebro (TradingAgents B3): recebe as decisões e reenvia pedidos/resultados pendentes. Sobe no logon e é conferido a cada 15 min (se já estiver rodando, sai na hora). Não faz nada se cerebro.enabled=false.</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>__USER__</UserId>
+      <Delay>PT1M</Delay>
+    </LogonTrigger>
+    <CalendarTrigger>
+      <Repetition><Interval>PT15M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>
+      <StartBoundary>2026-11-23T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>__USER__</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>__ROOT__\.venv\Scripts\pythonw.exe</Command>
+      <Arguments>-m ts cerebro serve</Arguments>
+      <WorkingDirectory>__ROOT__</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

@@ -205,6 +205,13 @@ def _eod_locked(
                            settings.execution.client_id_prefix)
     reference_r = _load_reference_r(settings, config_hash)
     state = repo.load_state(cfg, settings.execution.reference_capital, cal, before=sessions[0], reference_r=reference_r)
+    gate = None
+    if settings.cerebro.enabled:
+        from ts.app.cerebro import CerebroGate
+
+        gate = CerebroGate(conn, settings.cerebro)
+        engine.entry_gate = gate
+    closed_real: list[Any] = []
 
     summary: list[str] = []
     quarantine: tuple[date, str, str] | None = None
@@ -227,6 +234,10 @@ def _eod_locked(
                                  universe=universe)
         repo.record_session(run_id, res, state, config_hash)
         conn.commit()
+        closed_real.extend(t for t in res.closed_trades if not t.is_shadow)
+        vetoed = [f"{o.ticker} ({why})" for o, why in res.expired if why.startswith("Cérebro:")]
+        if vetoed:
+            notify(f"🧠 {d}: compras não executadas pelo Cérebro — " + "; ".join(vetoed))
         if state.breaker.just_halted:
             from ts.strategy.regime import market_state_series
 
@@ -245,6 +256,13 @@ def _eod_locked(
         if e.drawdown_pct >= 0.10:
             notify(f"🚨 KILL SWITCH G2: drawdown {e.drawdown_pct:.1%} ≥ 10% em {d} — interromper o paper e revisar")
 
+    if settings.cerebro.enabled:
+        from ts.app.cerebro import after_eod
+
+        for note in (gate.advisories if gate is not None else []):
+            notify(f"🧠 {note}")
+        for note in after_eod(conn, settings, closed_real, state, cal.next_session(sessions[-1])):
+            notify(f"🧠 {note}")
     db.update_run(run_id, "OK")
     notify(f"✅ EOD concluído {today} ({sync_info}). " + " || ".join(summary))
     if quarantine is not None:
@@ -333,6 +351,18 @@ def preopen_routine(
 
             pkg = build_preopen_package(state, today, cfg, settings.execution.client_id_prefix,
                                         settings.execution.fractional_shares)
+            if live and settings.cerebro.enabled:
+                # Same veto the EOD applies in the simulation, so the broker never gets a buy the book will expire.
+                from ts.app.cerebro import CerebroGate
+
+                gate = CerebroGate(conn, settings.cerebro)
+                keep, vetoed = [], []
+                for intent in pkg.entries:
+                    why = gate(intent.ticker, today)
+                    (vetoed if why else keep).append(intent if not why else f"{intent.ticker} ({why})")
+                pkg.entries[:] = keep
+                if vetoed:
+                    notify(f"🧠 PREOPEN {today}: compras não enviadas pelo Cérebro — " + "; ".join(map(str, vetoed)))
             sent = 0
             if live:
                 tickets = {p.ticker: p for p in broker_positions}
