@@ -1,0 +1,4 @@
+# Data files the system writes on the production machine (universe from B3, dividends from Yahoo).
+# Normalized to LF so a copy saved with Windows line endings is NOT seen as "modified" by git
+# (a modified tracked file makes deploy/scripts/update.ps1 refuse to update).
+*.csv text eol=lf

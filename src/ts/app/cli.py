@@ -231,7 +231,8 @@ def corp_actions_command(args: argparse.Namespace) -> int:
     merged = merged.sort_values(["ticker", "ex_date"])
     header = "# Gerado/mesclado por `python -m ts corp-actions`. Yahoo ja entrega precos ajustados por desdobramento:\n" \
              "# NAO inclua SPLIT/REVERSE_SPLIT aqui quando data.provider = yahoo.\n"
-    path.write_text(header + merged.to_csv(index=False), encoding="utf-8")
+    # LF line endings, same as the repository: a CRLF copy shows up as "modified" and blocks the auto-update
+    path.write_text(header + merged.to_csv(index=False, lineterminator="\n"), encoding="utf-8", newline="\n")
     console.print(f"{len(merged) - len(old)} novos eventos; total {len(merged)} em {path}")
     return 0
 

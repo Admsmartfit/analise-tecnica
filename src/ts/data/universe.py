@@ -86,7 +86,8 @@ def update_universe_file(d: date, universe_dir: str | Path | None = None, client
     if target.exists() and not overwrite:
         return None
     df = fetch_b3_index_portfolio("IBXX", client)
-    df.to_csv(target, index=False, encoding="utf-8")
+    # LF line endings, same as the repository: a CRLF copy shows up as "modified" and blocks the auto-update
+    df.to_csv(target, index=False, encoding="utf-8", lineterminator="\n")
     logger.info("Universe %s written from B3 (%d tickers, B3 date %s)", target.name, len(df), df.attrs.get("b3_date"))
     return target
 

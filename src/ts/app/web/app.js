@@ -236,10 +236,13 @@ function renderVersion(v) {
   const blocked = mod.length ? `<p class="vstate bad">${ico('stop')} A atualização será recusada: há arquivos alterados nesta máquina</p>
       <ul class="changes">${mod.slice(0, 10).map((f) => `<li><code>${esc(f)}</code></li>`).join('')}</ul>
       <p class="note">Desfaça essas alterações (ou envie-as pelo repositório de desenvolvimento) antes de atualizar.</p>` : '';
+  const data = v.data_files || [];
+  const dataNote = data.length ? `<p class="note">${ico('info')} Arquivos de dados gerados nesta máquina serão substituídos pela versão do GitHub
+      (a cópia local vai para <code>data\\backups\\local_data</code>): ${data.map((f) => `<code>${esc(f)}</code>`).join(', ')}</p>` : '';
   body.innerHTML = `<table class="mini"><tbody>
       <tr><td>Versão instalada</td><td class="num"><code>${short(v.installed)}</code> · ${esc(v.installed_date || '—')}</td></tr>
       <tr><td>Versão no GitHub</td><td class="num"><code>${short(v.available)}</code></td></tr>
-      <tr><td>Última verificação</td><td class="num">${checked}</td></tr></tbody></table>${status}${blocked}`;
+      <tr><td>Última verificação</td><td class="num">${checked}</td></tr></tbody></table>${status}${blocked}${dataNote}`;
   go.disabled = !v.update_available || mod.length > 0;
   go.title = go.disabled ? (mod.length ? 'Há arquivos alterados nesta máquina' : 'Nada para atualizar') : '';
 }

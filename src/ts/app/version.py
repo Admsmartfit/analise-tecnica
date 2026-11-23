@@ -1,11 +1,14 @@
 """Installed vs available version (git) and the in-app "update now" action used by the dashboard and CLI."""
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]  # src/ts/app/version.py -> repository root
+# Same pattern as $autoData in deploy/scripts/update.ps1: data files the system itself writes on this machine.
+AUTO_DATA = re.compile(r"^(config/universe/ibx100_[^/]+\.csv|config/corporate_actions\.csv)$")
 
 UPDATE_EXIT_CODES = {
     0: "Atualizado (ou já estava na última versão).",
@@ -31,6 +34,7 @@ class VersionInfo:
     pending: list[str]
     error: str | None = None
     modified: list[str] | None = None  # tracked files changed on this machine (update.ps1 refuses to run)
+    data_files: list[str] | None = None  # machine-written data files: replaced by the GitHub copy (backed up)
 
     @property
     def update_available(self) -> bool:
@@ -46,8 +50,11 @@ def check_version(root: Path = ROOT, branch: str = "main", fetch: bool = True) -
             _git(["fetch", "--quiet", "origin", branch], root, timeout=60)
         remote = _git(["rev-parse", f"origin/{branch}"], root)
         pending = _git(["log", "--format=%h %s", f"HEAD..origin/{branch}"], root).splitlines() if remote != head else []
-        modified = [ln[3:] for ln in _git(["status", "--porcelain", "--untracked-files=no"], root).splitlines() if ln.strip()]
-        return VersionInfo(head, head_date, remote, branch, pending, modified=modified)
+        changed = [ln[3:].strip('"') for ln in _git(["status", "--porcelain", "--untracked-files=no"], root).splitlines()
+                   if ln.strip()]
+        data = [f for f in changed if AUTO_DATA.match(f)]
+        return VersionInfo(head, head_date, remote, branch, pending,
+                           modified=[f for f in changed if f not in data], data_files=data)
     except (OSError, subprocess.SubprocessError) as e:
         return VersionInfo(None, None, None, branch, [], error=str(e))
 

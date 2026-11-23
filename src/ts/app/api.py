@@ -380,7 +380,7 @@ def _check_version_now(ctx: TerminalContext) -> dict[str, Any]:
         v = check_version(ctx.root)
         info = {"installed": v.installed, "installed_date": v.installed_date, "available": v.available,
                 "update_available": v.update_available, "pending": v.pending, "error": v.error,
-                "modified": v.modified or []}
+                "modified": v.modified or [], "data_files": v.data_files or []}
     except Exception as e:  # noqa: BLE001
         info = {"error": str(e), "update_available": False}
     info["checked_at"] = datetime.now().isoformat(timespec="seconds")

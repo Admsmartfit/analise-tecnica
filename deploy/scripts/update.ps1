@@ -63,7 +63,23 @@ try {
     Log "Novo commit: $msg (atual $($old.Substring(0,7)))"
 
     # ------------------------------------------------------------ 4. alterações locais?
-    $dirty = Invoke-Git @("status", "--porcelain", "--untracked-files=no")
+    # Arquivos de DADOS que o próprio sistema grava nesta máquina (carteira do IBrX baixada da B3, proventos do
+    # Yahoo) não bloqueiam: a cópia local vai para data\backups\local_data\<data-hora>\ e vale a do GitHub.
+    # Qualquer outro arquivo versionado alterado continua bloqueando (proteção contra edição manual).
+    $autoData = '^(config/universe/ibx100_[^/]+\.csv|config/corporate_actions\.csv)$'
+    $dirty = @(Invoke-Git @("status", "--porcelain", "--untracked-files=no") | Where-Object { $_ })
+    $dataFiles = @($dirty | ForEach-Object { $_.Substring(3).Trim('"') } | Where-Object { $_ -match $autoData })
+    if ($dataFiles.Count -gt 0) {
+        $bk = Join-Path $Root ("data\backups\local_data\{0:yyyyMMdd-HHmmss}" -f (Get-Date))
+        foreach ($f in $dataFiles) {
+            $dest = Join-Path $bk $f
+            New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+            Copy-Item -LiteralPath (Join-Path $Root $f) -Destination $dest -Force
+            Invoke-Git @("checkout", "--", $f) | Out-Null
+        }
+        Log "Arquivos de dados locais substituídos pela versão do GitHub (backup em $bk): $($dataFiles -join ', ')"
+        $dirty = @(Invoke-Git @("status", "--porcelain", "--untracked-files=no") | Where-Object { $_ })
+    }
     if ($dirty) {
         Log "ABORTADO: arquivos versionados modificados nesta máquina:`n$dirty"
         Notify "⚠️ UPDATE abortado: há arquivos versionados modificados localmente em $Root (use config\settings.local.yaml para ajustes da máquina)."
