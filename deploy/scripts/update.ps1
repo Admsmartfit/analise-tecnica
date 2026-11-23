@@ -78,7 +78,10 @@ try {
             Invoke-Git @("checkout", "--", $f) | Out-Null
         }
         Log "Arquivos de dados locais substituídos pela versão do GitHub (backup em $bk): $($dataFiles -join ', ')"
-        $dirty = @(Invoke-Git @("status", "--porcelain", "--untracked-files=no") | Where-Object { $_ })
+        # Fora da checagem: o reset --hard abaixo grava a versão nova deles de qualquer forma (mesmo quando o
+        # checkout acima não "limpa" o status, como num arquivo com quebras de linha mistas).
+        $dirty = @(Invoke-Git @("status", "--porcelain", "--untracked-files=no") | Where-Object { $_ } |
+                   Where-Object { $_.Substring(3).Trim('"') -notmatch $autoData })
     }
     if ($dirty) {
         Log "ABORTADO: arquivos versionados modificados nesta máquina:`n$dirty"
