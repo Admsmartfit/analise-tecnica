@@ -31,6 +31,10 @@ const ICONS = {
 const ico = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 function paintIcons(root = document) { for (const el of $$('[data-ico]', root)) el.outerHTML = ico(el.dataset.ico); }
 
+// true while the user types in a field; the target may also be the document/window (e.g. right after a dialog
+// closes), which has no .matches — calling it there threw and silently broke every keyboard shortcut.
+const isTyping = (ev) => ev.target instanceof Element && ev.target.matches('input, select, textarea, [contenteditable]');
+
 const store = {
   get(k, d) { try { const v = localStorage.getItem('ts.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('ts.' + k, JSON.stringify(v)); } catch { /* sem storage */ } },
@@ -391,7 +395,7 @@ function setupWatch() {
     const tr = ev.target.closest('tr[data-t]'); if (tr) select(tr.dataset.t);
   };
   document.addEventListener('keydown', (ev) => {
-    if (!['ArrowDown', 'ArrowUp'].includes(ev.key) || ev.target.matches('input, select')) return;
+    if (!['ArrowDown', 'ArrowUp'].includes(ev.key) || isTyping(ev) || document.querySelector('dialog[open]')) return;
     const rows = $$('#watch-table tbody tr[data-t]'); const i = rows.findIndex((r) => r.dataset.t === state.selected);
     const next = rows[Math.max(0, Math.min(rows.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1)))];
     if (next) { ev.preventDefault(); select(next.dataset.t); next.scrollIntoView({ block: 'nearest' }); }
@@ -864,7 +868,7 @@ function setupShortcuts() {
   $('#dlg-help-close').onclick = () => $('#dlg-help').close();
   document.addEventListener('keydown', (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); openPalette(); return; }
-    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.target.matches('input, select, textarea') || document.querySelector('dialog[open]')) return;
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || isTyping(ev) || document.querySelector('dialog[open]')) return;
     const tabs = Object.keys(TAB_NAMES);
     if (/^[1-6]$/.test(ev.key)) { state.tab = tabs[+ev.key - 1]; store.set('tab', state.tab); renderTab(); }
     else if (ev.key === '/') { ev.preventDefault(); $('#watch-filter').focus(); }

@@ -50,13 +50,16 @@ def _ps(script: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
 def tasks_status() -> list[dict[str, Any]]:
     """One PowerShell call for every task. Never raises (non-Windows / no scheduler -> 'Unknown')."""
     names = ",".join(f"'{n}'" for n in TASKS)
+    # COM Schedule.Service: ~0.5 s and language-independent. (The ScheduledTasks cmdlets took ~15 s here.)
     script = (
         "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
-        f"$r = foreach ($n in @({names})) {{ $t = Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue; "
-        "if ($t) { $i = $t | Get-ScheduledTaskInfo; [pscustomobject]@{ name=$n; state=\"$($t.State)\"; "
-        "last=$(if ($i.LastRunTime -and $i.LastRunTime.Year -gt 2000) { $i.LastRunTime.ToString('s') } else { $null }); "
-        "result=[int64]$i.LastTaskResult; "
-        "next=$(if ($i.NextRunTime) { $i.NextRunTime.ToString('s') } else { $null }) } } "
+        "$s = New-Object -ComObject Schedule.Service; $s.Connect(); $f = $s.GetFolder('\\'); "
+        "$st = @{0='Unknown';1='Disabled';2='Queued';3='Ready';4='Running'}; "
+        f"$r = foreach ($n in @({names})) {{ try {{ $t = $f.GetTask($n) }} catch {{ $t = $null }}; "
+        "if ($t) { [pscustomobject]@{ name=$n; state=$st[[int]$t.State]; "
+        "last=$(if ($t.LastRunTime.Year -gt 2000) { $t.LastRunTime.ToString('s') } else { $null }); "
+        "result=([int64]$t.LastTaskResult -band 0xFFFFFFFFL); "  # COM gives HRESULTs as negative int32
+        "next=$(if ($t.NextRunTime.Year -gt 2000) { $t.NextRunTime.ToString('s') } else { $null }) } } "
         "else { [pscustomobject]@{ name=$n; state='Missing'; last=$null; result=$null; next=$null } } }; "
         "$r | ConvertTo-Json -Compress"
     )
@@ -64,6 +67,9 @@ def tasks_status() -> list[dict[str, Any]]:
         proc = _ps(script)
         rows = json.loads(proc.stdout.strip() or "[]")
         rows = rows if isinstance(rows, list) else [rows]
+        seen = {r.get("name") for r in rows}
+        rows += [{"name": n, "state": "Unknown", "last": None, "result": None, "next": None}
+                 for n in TASKS if n not in seen]  # a task the scheduler failed to report never just vanishes
     except (OSError, subprocess.SubprocessError, ValueError):
         rows = [{"name": n, "state": "Unknown", "last": None, "result": None, "next": None} for n in TASKS]
     out = []
