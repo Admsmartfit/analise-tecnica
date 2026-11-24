@@ -87,7 +87,8 @@ export function setupServices({ api, toast, esc, ico, dmy, onChange, onRestart }
     const status = `<table class="mini svc-status"><tbody>
       <tr><td>${dot(cfg.enabled ? true : null)}Integração</td><td class="num">${cfg.enabled ? 'ligada' : 'desligada'}</td></tr>
       <tr><td>${dot(cfg.enabled ? !!c.listener_alive : null)}Webhook deste sistema</td><td class="num">${c.listener_alive ? 'no ar' : 'parado'} · <code>${esc(c.webhook_url || '')}</code></td></tr>
-      <tr><td>${dot(reach ? reach.ok : null)}Cérebro (TradingAgents)</td><td class="num">${reach ? esc(reach.message) : 'clique em "Testar Cérebro"'}</td></tr>
+      <tr><td>${dot(reach ? reach.ok : null)}Cérebro (TradingAgents)</td><td class="num">${reach ? esc(reach.message) : 'clique em "Testar Cérebro"'}
+        ${reach?.suggested_url ? `<br><button type="button" class="primary" id="svc-use-url" data-url="${esc(reach.suggested_url)}">Usar ${esc(reach.suggested_url)}</button>` : ''}</td></tr>
       <tr><td>${dot(null)}Decisões recebidas</td><td class="num">${c.decisions ?? 0}${c.last_decision_at ? ` · última ${when(c.last_decision_at)} UTC` : ''} · ${c.authorized_now ?? 0} autorizada(s) agora</td></tr>
       <tr><td>${dot(ob.failed ? false : null)}Envios ao Cérebro</td><td class="num">${ob.sent ?? 0} enviados · ${ob.pending ?? 0} na fila · ${ob.failed ?? 0} com falha</td></tr>
       ${c.last_error ? `<tr><td></td><td class="num bad">último erro: ${esc(hint(c.last_error.error) || c.last_error.error)}</td></tr>` : ''}
@@ -106,7 +107,7 @@ export function setupServices({ api, toast, esc, ico, dmy, onChange, onRestart }
           <label class="chk"><input type="radio" name="mode" value="advisory" ${cfg.mode === 'advisory' ? 'checked' : ''}> <span><b>Só avisar</b> (consultivo)<br><span class="note">Compra normalmente e manda um aviso 🧠 dizendo que teria sido bloqueada.</span></span></label>
         </fieldset>
         <div class="svc-grid">
-          <label>Endereço do Cérebro<input name="base_url" value="${esc(cfg.base_url || 'http://localhost:8000')}" placeholder="http://localhost:8000"></label>
+          <label>Endereço do Cérebro<input name="base_url" value="${esc(cfg.base_url || 'http://127.0.0.1:8000')}" placeholder="http://127.0.0.1:8000"></label>
           <label>Porta do webhook<input name="webhook_port" type="number" min="1024" max="65535" value="${cfg.webhook_port ?? 5000}"></label>
           <label>Convicção mínima (0 a 1)<input name="min_conviccao" type="number" min="0" max="1" step="0.05" value="${cfg.min_conviccao ?? 0}"></label>
           <label>Prioridade dos pedidos<select name="demand_priority">${['normal', 'alta', 'urgente'].map((p) => `<option ${cfg.demand_priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
@@ -189,6 +190,17 @@ export function setupServices({ api, toast, esc, ico, dmy, onChange, onRestart }
     if (b.id === 'svc-refresh') { data = null; render(); await load(); return; }
     if (b.id === 'svc-close') dlg.close();
     if (b.id === 'svc-restart') { b.disabled = true; onRestart?.(); }
+    if (b.id === 'svc-use-url') {
+      // the Cérebro was found at another address: save it and test again
+      b.disabled = true;
+      try {
+        const r = await api('/api/settings/cerebro', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base_url: b.dataset.url }) });
+        toast(`Endereço do Cérebro atualizado para ${b.dataset.url}. ${r.message}`, 'ok');
+      } catch (e) { toast(e.message, 'err'); }
+      delete results.cerebro;
+      setTimeout(async () => { await load(); await runTest('cerebro', true); onChange?.(); }, 2500);
+    }
   });
 
   dlg.addEventListener('submit', async (ev) => {

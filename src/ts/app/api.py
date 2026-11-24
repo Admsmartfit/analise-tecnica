@@ -820,14 +820,17 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
         from ts.app import services as sv
 
         s = ctx.settings
-        tests = {"cerebro": lambda: sv.test_cerebro_reach(s.cerebro.base_url),
+        tests = {"cerebro": lambda: sv.test_cerebro_reach(s.cerebro.base_url, s.cerebro.webhook_port),
                  "webhook": lambda: sv.test_webhook(s.cerebro),
                  "telegram": lambda: sv.test_telegram(s),
                  "dados": lambda: sv.test_data_source(s)}
         if kind not in tests:
             raise HTTPException(404, "Teste desconhecido")
-        ok, msg = tests[kind]()
-        return {"ok": ok, "message": msg}
+        ok, msg, *extra = tests[kind]()
+        out = {"ok": ok, "message": msg}
+        if extra and extra[0]:
+            out["suggested_url"] = extra[0]  # where the Cérebro was actually found
+        return out
 
     @app.post("/api/services/cerebro-retry")
     def services_cerebro_retry(x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:

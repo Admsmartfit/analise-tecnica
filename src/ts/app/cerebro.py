@@ -407,7 +407,8 @@ def _alive(cfg: CerebroSettings) -> bool:
 
     host = "127.0.0.1" if cfg.webhook_host in ("0.0.0.0", "") else cfg.webhook_host
     try:
-        r = httpx.get(f"http://{host}:{cfg.webhook_port}/health", timeout=0.8)
+        # 3 s: on a slower PC the webhook answered in ~1,3 s and the old 0,8 s limit showed it as "parado"
+        r = httpx.get(f"http://{host}:{cfg.webhook_port}/health", timeout=3.0)
         return r.status_code == 200 and r.json().get("service") == "ts-cerebro-webhook"
     except (httpx.HTTPError, ValueError):
         return False

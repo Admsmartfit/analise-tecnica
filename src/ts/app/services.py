@@ -164,17 +164,52 @@ def save_cerebro(root: Path, updates: dict[str, Any]) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------------------- one-click tests
-def test_cerebro_reach(base_url: str) -> tuple[bool, str]:
+CEREBRO_PORTS = (8000, 8001, 8002, 8080, 8081, 8888, 8008, 8010, 7000, 9000, 3000, 5001, 5050)
+
+
+def _cerebro_title(url: str, timeout: float) -> str | None:
+    """Title of the TradingAgents OpenAPI doc at ``url`` (None if it is not the Cérebro)."""
     import httpx
 
     try:
-        r = httpx.get(base_url.rstrip("/") + "/openapi.json", timeout=4)
+        r = httpx.get(url.rstrip("/") + "/openapi.json", timeout=timeout)
         title = r.json().get("info", {}).get("title") if r.status_code == 200 else None
-        if title:
-            return True, f"Cérebro respondendo em {base_url} ({title})"
-        return False, f"{base_url} respondeu HTTP {r.status_code}, mas não parece o TradingAgents"
-    except (httpx.HTTPError, ValueError) as e:
-        return False, f"Cérebro não responde em {base_url}: {type(e).__name__}. Ele está aberto?"
+        return title if title and "tradingagents" in title.lower() else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def discover_cerebro(webhook_port: int | None = None) -> str | None:
+    """Look for the TradingAgents on this PC: common ports, IPv4 (127.0.0.1) — 'localhost' may go to IPv6."""
+    import socket
+
+    for port in CEREBRO_PORTS:
+        if port == webhook_port:
+            continue
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.25)
+            if s.connect_ex(("127.0.0.1", port)) != 0:
+                continue  # nothing listening: skip without an HTTP request
+        url = f"http://127.0.0.1:{port}"
+        if _cerebro_title(url, 3.0):
+            return url
+    return None
+
+
+def test_cerebro_reach(base_url: str, webhook_port: int | None = None) -> tuple[bool, str, str | None]:
+    """(ok, message, suggested_url). On failure, searches the usual ports and suggests where the Cérebro is."""
+    title = _cerebro_title(base_url, 6.0)
+    if title:
+        return True, f"Cérebro respondendo em {base_url} ({title})", None
+    alt = base_url.replace("://localhost", "://127.0.0.1") if "://localhost" in base_url else None
+    if alt and _cerebro_title(alt, 6.0):  # 'localhost' resolved to IPv6 (::1) but the Cérebro listens on IPv4
+        return False, (f"O Cérebro responde em {alt}, mas não em {base_url} (o Windows manda 'localhost' para "
+                       "IPv6). Use o endereço com 127.0.0.1."), alt
+    found = discover_cerebro(webhook_port)
+    if found and found.rstrip("/") != base_url.rstrip("/"):
+        return False, f"O Cérebro não está em {base_url}, mas foi encontrado em {found}.", found
+    return False, (f"Cérebro não responde em {base_url} e não foi encontrado nas portas comuns deste PC. "
+                   "Ele está aberto? Confira o endereço na barra do navegador onde o Cockpit do Cérebro abre."), None
 
 
 def test_webhook(cfg: Any) -> tuple[bool, str]:
@@ -184,7 +219,7 @@ def test_webhook(cfg: Any) -> tuple[bool, str]:
     url = f"http://{host}:{cfg.webhook_port}{cfg.webhook_path}"
     try:
         r = httpx.post(url, json={"tipo": "ping_teste", "origem": "Central de Serviços", "mensagem": "teste"},
-                       timeout=4)
+                       timeout=8)
         if r.status_code == 200 and r.json().get("recebido"):
             return True, f"Webhook respondeu ao ping em {r.elapsed.total_seconds() * 1000:.0f} ms ({url})"
         return False, f"Webhook respondeu HTTP {r.status_code} em {url}"

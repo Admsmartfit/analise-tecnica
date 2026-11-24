@@ -130,6 +130,18 @@ try {
         $warn = " ⚠️ strategy.yaml mudou: pela regra 1.4.4 a contagem do paper reinicia."
     }
     if (Test-Path $rejectedFile) { Remove-Item $rejectedFile -Force }
+    # O webhook do Cérebro roda o dia todo: sem reiniciar ele continuaria com o código antigo.
+    if ($changed -match '^src/') {
+        try {
+            $svc = Get-ScheduledTask -TaskName "TS_Cerebro" -ErrorAction Stop
+            Stop-ScheduledTask -TaskName "TS_Cerebro" -ErrorAction SilentlyContinue
+            Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
+                Where-Object { $_.CommandLine -match 'cerebro serve' } |
+                ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            if ($svc.State -ne "Disabled") { Start-ScheduledTask -TaskName "TS_Cerebro" }
+            Log "Webhook do Cérebro reiniciado com a versão nova"
+        } catch { }   # tarefa não instalada: nada a fazer
+    }
     Log "Atualizado para $msg"
     Notify "🔄 Atualizado para $msg ($($changed.Count) arquivos).$warn"
 }

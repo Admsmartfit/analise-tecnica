@@ -74,7 +74,8 @@ class CerebroSettings(BaseModel):
     """
 
     enabled: bool = False
-    base_url: str = "http://localhost:8000"
+    # 127.0.0.1 (not "localhost"): on Windows "localhost" may resolve to IPv6 (::1) while the Cérebro listens on IPv4
+    base_url: str = "http://127.0.0.1:8000"
     # Webhook ② (recebe as decisões). 127.0.0.1 = só o próprio PC; para outra máquina use 0.0.0.0 + allowed_ips.
     webhook_host: str = "127.0.0.1"
     webhook_port: int = Field(5000, ge=1024, le=65535)

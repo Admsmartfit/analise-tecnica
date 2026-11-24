@@ -82,13 +82,46 @@ def test_one_click_tests(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sv, "test_webhook", lambda cfg: (True, f"ping ok na porta {cfg.webhook_port}"))
     r = client.post("/api/services/test?kind=webhook", headers=H).json()
     assert r == {"ok": True, "message": "ping ok na porta 5000"}
+    monkeypatch.setattr(sv, "test_cerebro_reach", lambda url, port=None: (False, "achei em outra porta", "http://127.0.0.1:8001"))
+    r = client.post("/api/services/test?kind=cerebro", headers=H).json()
+    assert r["suggested_url"] == "http://127.0.0.1:8001" and r["ok"] is False
     assert client.post("/api/services/test?kind=rm", headers=H).status_code == 404
     assert client.post("/api/services/test?kind=webhook").status_code == 403
 
 
-def test_cerebro_reach_message_when_down() -> None:
-    ok, msg = sv.test_cerebro_reach("http://127.0.0.1:1")  # nothing listens on port 1
-    assert ok is False and "não responde" in msg
+def test_cerebro_reach_message_when_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sv, "CEREBRO_PORTS", (1,))  # nothing listens on port 1
+    ok, msg, suggestion = sv.test_cerebro_reach("http://127.0.0.1:1")
+    assert ok is False and "não responde" in msg and suggestion is None
+
+
+def test_cerebro_found_on_another_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The case seen in production: Cérebro open, but not on the configured port -> suggest where it is."""
+    import socket
+    import threading
+    import time
+
+    import uvicorn
+    from fastapi import FastAPI
+
+    fake = FastAPI(title="TradingAgents B3 & Cockpit Web")
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(fake, host="127.0.0.1", port=port, log_level="error", log_config=None))
+    threading.Thread(target=server.run, daemon=True).start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    try:
+        monkeypatch.setattr(sv, "CEREBRO_PORTS", (1, port))
+        ok, msg, suggestion = sv.test_cerebro_reach("http://127.0.0.1:1")
+        assert ok is False and suggestion == f"http://127.0.0.1:{port}" and "encontrado" in msg
+        ok, msg, suggestion = sv.test_cerebro_reach(f"http://127.0.0.1:{port}")
+        assert ok is True and suggestion is None and "TradingAgents" in msg
+    finally:
+        server.should_exit = True
 
 
 def test_static_services_module_is_served(env: tuple) -> None:
