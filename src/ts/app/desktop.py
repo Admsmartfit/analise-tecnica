@@ -59,9 +59,16 @@ def ensure_streams(root: Path) -> Path | None:
     return log
 
 
-def run_ui(root: Path | None = None, port: int = DEFAULT_PORT, window: bool = True) -> int:
+def run_ui(root: Path | None = None, port: int = DEFAULT_PORT, window: bool = True, restart: bool = False) -> int:
     ensure_streams(root or Path.cwd())
     url = f"http://127.0.0.1:{port}/"
+    if restart:
+        # launched by the old instance right before it exits (after an update): wait for it to release the port,
+        # otherwise we would just open another window on the OLD server
+        for _ in range(100):
+            if not _running(port) and _port_free(port):
+                break
+            time.sleep(0.2)
     if _running(port):
         if not (window and _open_window(url)):
             webbrowser.open(url)

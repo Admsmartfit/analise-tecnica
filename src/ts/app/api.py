@@ -211,6 +211,7 @@ def build_status(ctx: TerminalContext, now: datetime | None = None) -> dict[str,
         "reference_capital": s.execution.reference_capital,
         "version": _version_info(ctx),
         "g0": g0_status(ctx, (now or datetime.now()).date()),
+        "server": server_freshness(ctx),
         "cerebro": cerebro_status(ctx),
         "server_time": (now or datetime.now()).isoformat(timespec="seconds"),
     }
@@ -371,6 +372,40 @@ def _version_info(ctx: TerminalContext) -> dict[str, Any]:
 
         threading.Thread(target=work, daemon=True).start()
     return cached[1] if cached else {"checking": True, "update_available": False}
+
+
+def _head_commit(root: Path) -> str | None:
+    """Commit currently on disk (cheap: reads .git, no subprocess)."""
+    try:
+        head = (root / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref: "):
+            ref = root / ".git" / head[5:]
+            if ref.exists():
+                return ref.read_text(encoding="utf-8").strip()
+            packed = root / ".git" / "packed-refs"
+            for line in packed.read_text(encoding="utf-8").splitlines() if packed.exists() else []:
+                if line.endswith(" " + head[5:]):
+                    return line.split()[0]
+            return None
+        return head
+    except OSError:
+        return None
+
+
+def server_freshness(ctx: TerminalContext) -> dict[str, Any]:
+    """Was a new version installed (e.g. by the automatic update) after this terminal started?"""
+    started = getattr(ctx, "started_commit", None)
+    disk = _head_commit(ctx.root)
+    return {"started": started, "disk": disk, "stale": bool(started and disk and started != disk)}
+
+
+def restart_terminal(root: Path) -> None:
+    """Start a fresh terminal (it waits for this one to release the port) and exit this process."""
+    pyw = root / ".venv" / "Scripts" / "pythonw.exe"
+    exe = str(pyw) if pyw.exists() else sys.executable
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen([exe, "-m", "ts", "ui", "--restart"], cwd=root, creationflags=flags, close_fds=True)  # noqa: S603
+    threading.Timer(1.0, lambda: os._exit(0)).start()  # let the HTTP response go out first
 
 
 def _check_version_now(ctx: TerminalContext) -> dict[str, Any]:
@@ -686,6 +721,7 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
         else B3Calendar(),
         token=token or secrets.token_urlsafe(24),
     )
+    ctx.started_commit = _head_commit(root)  # type: ignore[attr-defined]  # code this server process is running
     try:
         from ts.core.config import load_strategy_config
 
@@ -761,6 +797,14 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
 
         ok, msg = sv.restart_task(name) if action == "restart" else sv.task_action(name, action)
         return {"ok": ok, "message": msg}
+
+    @app.post("/api/actions/restart")
+    def action_restart(x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:
+        check_token(x_ts_token)
+        if any(j.status == "running" for j in ctx.jobs.values()):
+            raise HTTPException(409, "Há uma ação em andamento; reinicie quando ela terminar.")
+        restart_terminal(root)
+        return {"ok": True, "message": "Reiniciando o terminal… a janela fecha e abre de novo em alguns segundos."}
 
     @app.post("/api/services/register")
     def services_register(x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:

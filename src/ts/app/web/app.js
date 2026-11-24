@@ -174,9 +174,33 @@ async function loadStatus() {
   renderBanner(s);
 }
 
+async function restartTerminal() {
+  try {
+    const r = await api('/api/actions/restart', { method: 'POST' });
+    toast(r.message, 'ok');
+    // desktop window: this process exits and a new window opens; browser tab: reload when the new server is up
+    for (let i = 0; i < 40; i++) {
+      await new Promise((res) => setTimeout(res, 1000));
+      try { const h = await fetch('/api/health', { cache: 'no-store' }); if (h.ok && i > 2) { location.reload(); return; } } catch { /* restarting */ }
+    }
+  } catch (e) {
+    toast(/not found/i.test(e.message)
+      ? 'Este terminal é de uma versão anterior e não sabe se reiniciar: feche a janela e abra de novo pelo atalho "Trading System B3".'
+      : e.message, 'err');
+  }
+}
+
 function renderBanner(s) {
   const cb = s.circuit_breaker || {}; const q = s.quarantine || {}; const cand = s.candidate; const ov = s.override || {};
   const banner = $('#cb-banner');
+  if (s.server?.stale || s.server === undefined) {  // undefined = server older than this screen (no version info)
+    // the automatic update replaced the files while this window was open: the screen is new, the engine is old
+    banner.className = 'banner l1';
+    banner.innerHTML = `${ico('refresh')} Uma versão nova do sistema foi instalada enquanto o terminal estava aberto.
+      Reinicie para usar tudo da versão nova. <button type="button" class="primary" id="btn-restart">Reiniciar agora</button>`;
+    $('#btn-restart').onclick = restartTerminal;
+    return;
+  }
   if (ov.status === 'error') {
     banner.className = 'banner cfgerr';
     banner.textContent = `Configuração inválida — o EOD não roda até corrigir: ${ov.error}`;
@@ -288,7 +312,8 @@ async function runAction(kind, label) {
       const j = await api(`/api/jobs/${job}`);
       if (j.status === 'done') {
         toast(j.message || `Concluído (código ${j.code}).`, j.code === 0 ? 'ok' : 'err');
-        if (kind === 'update' && j.code === 0) setTimeout(() => location.reload(), 1500);
+        // new code on disk: restart the whole terminal (server included), not only reload the page
+        if (kind === 'update' && j.code === 0) setTimeout(restartTerminal, 1500);
         await refreshAll(); return j;
       }
     }
@@ -908,7 +933,7 @@ function setupPolling() {
 paintIcons();
 applyLook(); setupSettings(); setupSplitters(); setupUpdate(); setupWatch(); setupChartControls(); setupTabs();
 setupPalette(); setupShortcuts(); setupPolling();
-const svc = setupServices({ api, toast, esc, ico, dmy, onChange: () => refreshAll() });
+const svc = setupServices({ api, toast, esc, ico, dmy, onChange: () => refreshAll(), onRestart: restartTerminal });
 svc.checkAlert();
 setInterval(() => { if (!document.hidden) svc.checkAlert(); }, 120_000);
 // link direto: http://127.0.0.1:8765/#servicos (ou #cerebro, #testes) abre a Central na aba

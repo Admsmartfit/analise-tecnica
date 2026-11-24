@@ -1,6 +1,6 @@
 // Central de Serviços: tarefas agendadas, configuração do Cérebro e testes — sem PowerShell.
 // Recebe do app.js os utilitários (api, toast, esc, ico, dmy) para não duplicar código.
-export function setupServices({ api, toast, esc, ico, dmy, onChange }) {
+export function setupServices({ api, toast, esc, ico, dmy, onChange, onRestart }) {
   const $ = (s, el = document) => el.querySelector(s);
   const dlg = $('#dlg-services');
   let tab = 'servicos';
@@ -147,7 +147,16 @@ export function setupServices({ api, toast, esc, ico, dmy, onChange }) {
   }
 
   async function load() {
-    try { data = await api('/api/services'); } catch (e) { $('#svc-body').innerHTML = `<p class="bad">Erro ao carregar: ${esc(e.message)}</p>`; return; }
+    const slow = setTimeout(() => {
+      if (!data) $('#svc-body').insertAdjacentHTML('beforeend', '<p class="note">Lendo as tarefas do Windows… isso costuma levar menos de 1 segundo.</p>');
+    }, 4000);
+    try { data = await api('/api/services'); } catch (e) {
+      const old = /not found/i.test(e.message);
+      $('#svc-body').innerHTML = `<div class="svc-banner bad">${ico('stop')} <div><b>Não foi possível carregar a Central.</b><br>
+        ${old ? 'O terminal aberto ainda está rodando a versão anterior do sistema (a atualização chegou com ele aberto).'
+              : esc(e.message)}<br><br><button type="button" class="primary" id="svc-restart">Reiniciar o terminal</button></div></div>`;
+      return;
+    } finally { clearTimeout(slow); }
     render();
   }
 
@@ -179,6 +188,7 @@ export function setupServices({ api, toast, esc, ico, dmy, onChange }) {
     if (b.id === 'svc-retry') { b.disabled = true; await act('/api/services/cerebro-retry', 'Reenvio feito'); return; }
     if (b.id === 'svc-refresh') { data = null; render(); await load(); return; }
     if (b.id === 'svc-close') dlg.close();
+    if (b.id === 'svc-restart') { b.disabled = true; onRestart?.(); }
   });
 
   dlg.addEventListener('submit', async (ev) => {

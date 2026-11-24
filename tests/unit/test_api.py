@@ -167,6 +167,30 @@ def test_version_endpoint_refresh(client: TestClient, monkeypatch: pytest.Monkey
     assert client.get("/api/status").json()["version"]["installed"] == "a" * 40  # refreshed value is cached
 
 
+def test_server_freshness_detects_update_while_open(client: TestClient, root: Path) -> None:
+    import ts.app.api as api_mod
+
+    git = root / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (git / "refs" / "heads" / "main").write_text("a" * 40 + "\n", encoding="utf-8")
+    ctx = client.app.state.ctx
+    ctx.started_commit = "a" * 40
+    assert client.get("/api/status").json()["server"]["stale"] is False
+    (git / "refs" / "heads" / "main").write_text("b" * 40 + "\n", encoding="utf-8")  # auto-update while open
+    s = client.get("/api/status").json()["server"]
+    assert s["stale"] is True and s["disk"] == "b" * 40
+    assert client.post("/api/actions/restart").status_code == 403
+    called = []
+    orig = api_mod.restart_terminal
+    api_mod.restart_terminal = lambda r: called.append(r)
+    try:
+        assert client.post("/api/actions/restart", headers={"X-TS-Token": "secret-token"}).json()["ok"]
+    finally:
+        api_mod.restart_terminal = orig
+    assert called == [root]
+
+
 def test_empty_terminal_tabs(client: TestClient) -> None:
     assert client.get("/api/positions").json() == []
     assert client.get("/api/orders").json() == []

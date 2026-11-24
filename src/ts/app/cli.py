@@ -321,7 +321,7 @@ def ui_command(args: argparse.Namespace) -> int:
     """Open the visual terminal (local API + desktop window)."""
     from ts.app.desktop import run_ui
 
-    return run_ui(port=args.port, window=not args.browser)
+    return run_ui(port=args.port, window=not args.browser, restart=args.restart)
 
 
 def cerebro_command(args: argparse.Namespace) -> int:
@@ -561,6 +561,7 @@ def main() -> None:
     ui_p = subparsers.add_parser("ui", help="Abre o terminal visual (janela desktop)")
     ui_p.add_argument("--port", type=int, default=8765)
     ui_p.add_argument("--browser", action="store_true", help="Abrir no navegador em vez da janela")
+    ui_p.add_argument("--restart", action="store_true", help=argparse.SUPPRESS)  # used by "Reiniciar terminal"
 
     nt_p = subparsers.add_parser("notify", help="Send a Telegram message (used by the updater)")
     nt_p.add_argument("message", type=str)
