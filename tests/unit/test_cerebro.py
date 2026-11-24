@@ -131,7 +131,7 @@ def test_webhook_endpoint(tmp_path: Path) -> None:
     client = TestClient(cb.create_webhook_app(s, db))
     assert client.get("/health").json()["service"] == "ts-cerebro-webhook"
     r = client.post("/webhook/decisao", json=_decision())
-    assert r.status_code == 200 and r.json() == {"ok": True, "duplicado": False}
+    assert r.status_code == 200 and r.json()["recebido"] is True and r.json()["duplicado"] is False
     assert client.post("/webhook/decisao", json=_decision()).json()["duplicado"] is True
     assert client.post("/webhook/decisao", json={"ativo": "PETR4"}).status_code == 422
     c = sqlite3.connect(db)
@@ -139,6 +139,30 @@ def test_webhook_endpoint(tmp_path: Path) -> None:
     s2 = Settings()
     s2.cerebro = CerebroSettings(enabled=True)  # default: only 127.0.0.1 / ::1
     assert TestClient(cb.create_webhook_app(s2, db)).post("/webhook/decisao", json=_decision(id_=9)).status_code == 403
+
+
+def test_webhook_ping_and_decision_without_id(tmp_path: Path) -> None:
+    """Newer spec: 'ping_teste' answered at once, and decisions may come without id_analise."""
+    from fastapi.testclient import TestClient
+
+    s = Settings()
+    s.cerebro = CerebroSettings(enabled=True, allowed_ips=["testclient"])
+    db = tmp_path / "t.db"
+    client = TestClient(cb.create_webhook_app(s, db))
+    r = client.post("/webhook/decisao", json={"tipo": "ping_teste", "origem": "TradingAgents B3", "mensagem": "oi"})
+    assert r.status_code == 200 and r.json() == {"status": "ok", "recebido": True}
+    assert client.get("/health").json()["last_ping"]
+    body = {"ativo": "PETR4", "status": "autorizado", "conviccao": 0.85, "validade_dias": 7,
+            "tese_resumida": "Resumo.", "indicadores_chave": {"PL": 4.5, "ROE_pct": 28.0, "DY_pct": 14.0},
+            "data_autorizacao": "2026-11-24T12:00:00", "data_expiracao": "2026-12-01T12:00:00"}
+    r = client.post("/webhook/decisao", json=body)
+    assert r.status_code == 200 and r.json()["status"] == "ok" and r.json()["duplicado"] is False
+    assert client.post("/webhook/decisao", json=body).json()["duplicado"] is True  # same content: deduplicated
+    c = sqlite3.connect(db)
+    (id_,) = c.execute("SELECT id_analise FROM cerebro_decisions").fetchone()
+    assert id_ < 0  # synthetic ids never collide with the Cérebro's positive ones
+    assert cb.latest_decision(c, "PETR4", datetime(2026, 11, 25))["status"] == "autorizado"
+    assert c.execute("SELECT COUNT(*) FROM cerebro_decisions").fetchone()[0] == 1  # the ping stored nothing
 
 
 # ------------------------------------------------------------------------------------------- ① ③ outbox
@@ -171,7 +195,7 @@ def test_outbox_sends_retries_and_gives_up(conn: sqlite3.Connection) -> None:
     assert cb.enqueue_feedback(conn, _trade(10.0), "paper") and not cb.enqueue_feedback(conn, _trade(10.0), "paper")
     assert cb.flush_outbox(conn, cfg, client=client) == {"sent": 2, "retry": 0, "failed": 0}
     assert calls[0] == ("/api/queue/demand", {"ativos": ["PETR4", "VALE3"], "prioridade": "alta",
-                                              "origem": "trading_system_b3"})
+                                              "origem": "robo_tecnico"})
     assert calls[1][0] == "/api/memory/feedback" and calls[1][1]["resultado"] == "WIN"
     mode["code"] = 503
     cb.enqueue_demand(conn, ["WEGE3"], key="k2")
@@ -200,7 +224,7 @@ def test_after_eod_asks_only_for_buys_without_valid_authorization(conn: sqlite3.
     state = SimpleNamespace(pending=[po("PETR4"), po("VALE3"), po("WEGE3", shadow=True), po("ITUB4", side="SELL")])
     notes = cb.after_eod(conn, s, [_trade(5.0)], state, nxt)
     demand = [p for p in sent if "ativos" in p]
-    assert demand == [{"ativos": ["PETR4"], "prioridade": "alta", "origem": "trading_system_b3"}]
+    assert demand == [{"ativos": ["PETR4"], "prioridade": "alta", "origem": "robo_tecnico"}]
     assert any(p.get("resultado") == "WIN" for p in sent) and any("PETR4" in n for n in notes)
     s.cerebro.enabled = False
     assert cb.after_eod(conn, s, [], state, nxt) == []

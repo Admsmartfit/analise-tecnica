@@ -87,9 +87,18 @@ class Decision(BaseModel):
     data_autorizacao: str
     data_expiracao: str
     timestamp: str | None = None
-    id_analise: int
+    # Optional in the newer spec: without it a deterministic NEGATIVE id is derived from the content, so resends of
+    # the same decision are still deduplicated and can never collide with a real (positive) id from the Cérebro.
+    id_analise: int | None = None
     origem_decisao: str | None = None
     fontes_consultadas: str | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.id_analise is None:
+            import zlib
+
+            key = f"{self.ativo}|{self.status}|{self.data_autorizacao}|{self.data_expiracao}|{self.conviccao}"
+            self.id_analise = -(zlib.crc32(key.encode("utf-8")) or 1)
 
     @field_validator("ativo")
     @classmethod
@@ -190,9 +199,11 @@ def create_webhook_app(settings: Settings, db_path: str | Path | None = None) ->
                 migrated["done"] = True
         return c
 
+    last_ping: dict[str, Any] = {}
+
     @app.get("/health")
     def health() -> dict[str, Any]:
-        return {"ok": True, "service": "ts-cerebro-webhook"}
+        return {"ok": True, "service": "ts-cerebro-webhook", "last_ping": last_ping.get("at")}
 
     @app.post(cfg.webhook_path)
     async def decisao(request: Request) -> JSONResponse:
@@ -202,6 +213,14 @@ def create_webhook_app(settings: Settings, db_path: str | Path | None = None) ->
             return JSONResponse({"ok": False, "erro": "origem não autorizada"}, status_code=403)
         try:
             raw = await request.json()
+        except ValueError:
+            return JSONResponse({"ok": False, "erro": "JSON inválido"}, status_code=422)
+        if isinstance(raw, dict) and raw.get("tipo") == "ping_teste":
+            # "Testar conexão" do Cérebro: responde na hora, não grava nada
+            last_ping["at"] = _iso(utcnow())
+            logger.info("cerebro ping_teste de %s: %s", raw.get("origem"), str(raw.get("mensagem", ""))[:200])
+            return JSONResponse({"status": "ok", "recebido": True})
+        try:
             d = Decision.model_validate(raw)
         except (ValidationError, ValueError) as e:
             logger.warning("cerebro webhook: invalid payload: %s", e)
@@ -213,7 +232,7 @@ def create_webhook_app(settings: Settings, db_path: str | Path | None = None) ->
             c.close()
         logger.info("cerebro decision %s %s %s (%.0f%%) id=%s%s", d.ativo, d.status, d.data_expiracao,
                     d.conviccao * 100, d.id_analise, "" if new else " (duplicada)")
-        return JSONResponse({"ok": True, "duplicado": not new})
+        return JSONResponse({"status": "ok", "recebido": True, "ok": True, "duplicado": not new})
 
     return app
 
@@ -233,7 +252,7 @@ def enqueue_demand(conn: sqlite3.Connection, tickers: Iterable[str], priority: s
     ativos = sorted({norm_ticker(t) for t in tickers if t})
     if not ativos:
         return []
-    payload = {"ativos": ativos, "prioridade": priority, "origem": "trading_system_b3"}
+    payload = {"ativos": ativos, "prioridade": priority, "origem": "robo_tecnico"}
     _enqueue(conn, "demand", key or f"demand:{_iso(utcnow())}:{','.join(ativos)}", payload)
     return ativos
 
