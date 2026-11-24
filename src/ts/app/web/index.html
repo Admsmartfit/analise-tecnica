@@ -23,6 +23,7 @@
       <span data-ico="search"></span><span>Buscar ou executar…</span><kbd>Ctrl K</kbd></button>
     <button id="st-update" class="badge hidden" type="button" title="Há uma versão nova"><span data-ico="refresh"></span> Atualização disponível</button>
     <button id="btn-version" class="icon-btn ver-btn" type="button" title="Versão instalada e atualizações"><span data-ico="info"></span> <span id="st-ver">versão</span></button>
+    <button id="btn-services" class="icon-btn svc-btn" type="button" title="Central de Serviços: tarefas, Cérebro e testes (S)"><span data-ico="server"></span> <span>Serviços</span><span id="svc-alert" class="svc-alert hidden">!</span></button>
     <button id="btn-help" class="icon-btn" type="button" title="Atalhos de teclado (?)" aria-label="Atalhos de teclado"><span data-ico="keyboard"></span></button>
     <button id="btn-settings" class="icon-btn" type="button" title="Aparência" aria-label="Aparência"><span data-ico="settings"></span></button>
   </header>
@@ -165,6 +166,22 @@
     <div class="palette-foot"><kbd>↑</kbd><kbd>↓</kbd> navegar · <kbd>Enter</kbd> abrir · <kbd>Esc</kbd> fechar</div>
   </dialog>
 
+  <dialog id="dlg-services" class="svc-dlg" aria-labelledby="dlg-services-title">
+    <div class="svc-head">
+      <h3 id="dlg-services-title">Central de Serviços</h3>
+      <span id="svc-sub" class="muted"></span>
+      <span class="sb-spacer"></span>
+      <button type="button" id="svc-refresh"><span data-ico="refresh"></span> Atualizar</button>
+      <button type="button" id="svc-close" class="primary">Fechar</button>
+    </div>
+    <div class="tabs svc-tabs" role="tablist">
+      <button role="tab" class="tab on" data-svc="servicos" type="button">Serviços</button>
+      <button role="tab" class="tab" data-svc="cerebro" type="button">Cérebro (TradingAgents)</button>
+      <button role="tab" class="tab" data-svc="testes" type="button">Testes</button>
+    </div>
+    <div id="svc-body" class="svc-body"></div>
+  </dialog>
+
   <dialog id="dlg-help" aria-labelledby="dlg-help-title">
     <h3 id="dlg-help-title">Atalhos de teclado</h3>
     <table class="keys"><tbody>
@@ -175,6 +192,7 @@
       <tr><td><kbd>F</kbd></td><td>Favoritar o ativo selecionado</td></tr>
       <tr><td><kbd>R</kbd></td><td>Recarregar os dados agora</td></tr>
       <tr><td><kbd>U</kbd></td><td>Versão e atualizações</td></tr>
+      <tr><td><kbd>S</kbd></td><td>Central de Serviços (tarefas, Cérebro, testes)</td></tr>
       <tr><td><kbd>?</kbd></td><td>Esta ajuda</td></tr>
     </tbody></table>
     <div class="dlg-actions"><button type="button" id="dlg-help-close" class="primary">Fechar</button></div>

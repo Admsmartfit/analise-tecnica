@@ -77,17 +77,17 @@ class CerebroSettings(BaseModel):
     base_url: str = "http://localhost:8000"
     # Webhook ② (recebe as decisões). 127.0.0.1 = só o próprio PC; para outra máquina use 0.0.0.0 + allowed_ips.
     webhook_host: str = "127.0.0.1"
-    webhook_port: int = 5000
+    webhook_port: int = Field(5000, ge=1024, le=65535)
     webhook_path: str = "/webhook/decisao"
     allowed_ips: list[str] = Field(default_factory=lambda: ["127.0.0.1", "::1"])
     # required = só compra com decisão "autorizado" válida na abertura; advisory = só registra (não bloqueia).
     mode: Literal["required", "advisory"] = "required"
-    min_conviccao: float = 0.0
+    min_conviccao: float = Field(0.0, ge=0.0, le=1.0)
     allow_contingency: bool = True  # aceitar autorizações da "Regra de contingência (sem IA)"
     demand_priority: Literal["normal", "alta", "urgente"] = "alta"
     send_feedback: bool = True
-    demand_timeout_s: float = 10.0
-    feedback_timeout_s: float = 90.0
+    demand_timeout_s: float = Field(10.0, gt=0)
+    feedback_timeout_s: float = Field(90.0, gt=0)
 
 
 class Settings(BaseModel):

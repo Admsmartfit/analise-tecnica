@@ -132,6 +132,7 @@ dialog .row { display: flex; justify-content: space-between; align-items: center
 @media (max-width: 1366px) {
   :root { --watch-w: 330px; --inspector-w: 280px; } .layers { display: none; }
   .cmd-btn { min-width: 0; } .cmd-btn span:nth-child(2), #st-breadth { display: none; }
+  .svc-btn > span:nth-of-type(1) { display: none; }
 }
 
 /* ---------------------------------------------------------------- patrimônio */
@@ -157,6 +158,40 @@ kbd { font: 11px/1 var(--font); padding: 2px 5px; border: 1px solid var(--line);
 .palette li .grp { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); min-width: 52px; }
 .palette-foot { padding: 8px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .keys td { padding: 5px 10px 5px 0; } .keys td:first-child { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- Central de Serviços */
+.svc-btn { display: inline-flex; align-items: center; gap: 4px; position: relative; }
+.svc-alert { background: var(--danger); color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700; padding: 0 5px; margin-left: 2px; }
+.svc-dlg { width: min(1000px, 96vw); max-width: none; max-height: 90vh; padding: 0; display: flex; flex-direction: column; }
+.svc-dlg[open] { display: flex; }
+.svc-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.svc-head h3 { margin: 0; }
+.svc-tabs { padding: 4px 12px 0; }
+.svc-body { padding: 12px 16px 16px; overflow: auto; }
+.svc-table td { white-space: normal; height: auto; padding: 8px 6px; vertical-align: top; }
+.svc-table tbody tr { cursor: default; }
+.svc-acts { white-space: nowrap; text-align: right; } .svc-acts button { margin-left: 4px; }
+.svc-res { min-width: 260px; }
+.svc-err { margin-top: 4px; font-size: 12px; color: var(--danger); }
+.svc-banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid; }
+.svc-banner ul { margin: 4px 0 0; padding-left: 18px; }
+.svc-banner.ok { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, var(--panel)); }
+.svc-banner.bad { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--panel)); }
+.svc-foot { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+.svc-actions { display: flex; gap: 8px; margin: 10px 0 14px; flex-wrap: wrap; }
+.svc-status td { padding: 5px 0; }
+.svc-form { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.svc-form h4 { margin: 0; font-size: 13px; }
+.svc-form fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+.svc-form legend { color: var(--muted); padding: 0 4px; }
+.svc-form .chk { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.svc-form .chk input { margin-top: 3px; }
+.svc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.svc-grid label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.note.bad, .bad { color: var(--danger); }
+.card-h { display: flex; align-items: center; gap: 8px; }
+.link-btn { margin-left: auto; border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 11px; text-transform: none; letter-spacing: 0; display: inline-flex; gap: 4px; align-items: center; }
+.link-btn:hover { text-decoration: underline; }
 
 /* ---------------------------------------------------------------- Cérebro (fundamentos) */
 .fund-col { text-align: center; width: 44px; }

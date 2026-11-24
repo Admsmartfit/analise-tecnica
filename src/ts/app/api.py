@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -731,6 +731,97 @@ def create_app(root: Path | None = None, settings: Settings | None = None, token
     @app.get("/api/chart/{ticker}")
     def chart(ticker: str, period: str = "1A") -> dict[str, Any]:
         return build_chart(ctx, ticker, period)
+
+    # ---------------------------------------------------------------- Central de Serviços
+    def _reload_settings() -> None:
+        ctx.settings = load_settings(root / "config" / "settings.yaml")  # picks up settings.local.yaml
+        with ctx._lock:
+            ctx._cache.pop("watchlist", None)
+
+    @app.get("/api/services")
+    def services_overview() -> dict[str, Any]:
+        from ts.app import services as sv
+
+        s = ctx.settings
+        last_runs = ctx.query(
+            "SELECT routine, session_date, started_at, status, error FROM runs r WHERE started_at = "
+            "(SELECT MAX(started_at) FROM runs WHERE routine = r.routine) ORDER BY routine")
+        return {
+            "tasks": sv.tasks_status(),
+            "cerebro": cerebro_status(ctx) | {"config": s.cerebro.model_dump()},
+            "data_provider": s.data.provider, "telegram_enabled": s.telegram.enabled, "mode": s.execution.mode,
+            "root": str(root), "local_config": str(root / "config" / "settings.local.yaml"),
+            "last_runs": _records(last_runs) if not last_runs.empty else [],
+        }
+
+    @app.post("/api/services/task")
+    def services_task(name: str, action: str, x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:
+        check_token(x_ts_token)
+        from ts.app import services as sv
+
+        ok, msg = sv.restart_task(name) if action == "restart" else sv.task_action(name, action)
+        return {"ok": ok, "message": msg}
+
+    @app.post("/api/services/register")
+    def services_register(x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:
+        check_token(x_ts_token)
+        from ts.app import services as sv
+
+        ok, msg = sv.register_tasks(root)
+        return {"ok": ok, "message": msg}
+
+    @app.post("/api/services/test")
+    def services_test(kind: str, x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:
+        check_token(x_ts_token)
+        from ts.app import services as sv
+
+        s = ctx.settings
+        tests = {"cerebro": lambda: sv.test_cerebro_reach(s.cerebro.base_url),
+                 "webhook": lambda: sv.test_webhook(s.cerebro),
+                 "telegram": lambda: sv.test_telegram(s),
+                 "dados": lambda: sv.test_data_source(s)}
+        if kind not in tests:
+            raise HTTPException(404, "Teste desconhecido")
+        ok, msg = tests[kind]()
+        return {"ok": ok, "message": msg}
+
+    @app.post("/api/services/cerebro-retry")
+    def services_cerebro_retry(x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:
+        check_token(x_ts_token)
+        from ts.app import cerebro as cb
+        from ts.persistence.db import DatabaseManager
+
+        db = DatabaseManager(ctx.path(ctx.settings.system.db_path))
+        try:
+            conn = db.get_conn()
+            n = cb.retry_failed(conn)
+            res = cb.flush_outbox(conn, ctx.settings.cerebro, budget_s=20)
+        finally:
+            db.close()
+        return {"ok": not res["failed"] and not res["retry"],
+                "message": f"{n} envio(s) devolvido(s) à fila · enviados {res['sent']}, para reenviar {res['retry']}, "
+                           f"falharam {res['failed']}"}
+
+    @app.post("/api/settings/cerebro")
+    async def settings_cerebro(request: Request, x_ts_token: str | None = Header(default=None)) -> dict[str, Any]:
+        check_token(x_ts_token)
+        from ts.app import services as sv
+
+        try:
+            body = await request.json()
+            saved = sv.save_cerebro(root, body if isinstance(body, dict) else {})
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        _reload_settings()
+        cfg = ctx.settings.cerebro
+        # apply: the webhook service reads the settings only when it starts
+        if cfg.enabled:
+            ok, msg = sv.restart_task("TS_Cerebro")
+            applied = "Webhook do Cérebro reiniciado com a configuração nova." if ok else f"Salvo, mas: {msg}"
+        else:
+            sv.task_action("TS_Cerebro", "stop")
+            applied = "Integração desligada; webhook parado."
+        return {"ok": True, "saved": saved, "message": f"Configuração salva. {applied}", "config": cfg.model_dump()}
 
     @app.get("/api/version")
     def version(refresh: bool = False) -> dict[str, Any]:

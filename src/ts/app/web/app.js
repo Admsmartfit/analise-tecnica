@@ -1,4 +1,6 @@
 // Trading System B3 — terminal (U1). JavaScript sem build; só lê a API local.
+import { setupServices } from './services.js';
+
 const TOKEN = document.querySelector('meta[name="ts-token"]').content;
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -24,7 +26,7 @@ const ICONS = {
   play: '<path d="m6 4 14 8-14 8z"/>', download: '<path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/>',
   chart: '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/>', tab: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  check: '<path d="m5 12 5 5L20 7"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>', chevL: '<path d="m15 18-6-6 6-6"/>', chevR: '<path d="m9 18 6-6-6-6"/>', chevD: '<path d="m6 9 6 6 6-6"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  check: '<path d="m5 12 5 5L20 7"/>', server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>', chevL: '<path d="m15 18-6-6 6-6"/>', chevR: '<path d="m9 18 6-6-6-6"/>', chevD: '<path d="m6 9 6 6 6-6"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
 };
 const ico = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 function paintIcons(root = document) { for (const el of $$('[data-ico]', root)) el.outerHTML = ico(el.dataset.ico); }
@@ -668,7 +670,7 @@ async function renderToday(body) {
       ${ns.act ? `<div><button class="primary" data-act="${ns.act}">${ico(ns.act === 'sync' ? 'download' : 'play')} ${ns.label}</button></div>` : ''}
       ${ns.cand ? '<div><button class="primary" id="today-cand">Revisar candidata</button></div>' : ''}
       ${ns.upd ? '<div><button class="primary" id="today-upd">Ver atualização</button></div>' : ''}</div>
-    <div class="card"><h4>Saúde do sistema</h4><table class="mini"><tbody>
+    <div class="card"><h4 class="card-h">Saúde do sistema <button type="button" class="link-btn" id="today-svc">${ico('server')} Gerenciar serviços</button></h4><table class="mini"><tbody>
       <tr><td>${dot(s && !s.data.stale)}Dados</td><td class="num">${s?.data.last_bar ? dmy(s.data.last_bar) : 'sem cotações'}</td></tr>
       <tr><td>${dot(s?.last_eod ? s.last_eod.status === 'OK' : null)}Último EOD</td><td class="num">${s?.last_eod ? `${dmy(s.last_eod.session_date)} · ${esc(s.last_eod.status)}` : 'nenhum'}</td></tr>
       <tr><td>${dot(true)}Fonte</td><td class="num">${esc(s?.connection.label || '—')}</td></tr>
@@ -712,6 +714,7 @@ async function renderToday(body) {
   </div>`;
   $('#today-cand')?.addEventListener('click', openCandidate);
   $('#today-upd')?.addEventListener('click', () => $('#st-update').click());
+  $('#today-svc')?.addEventListener('click', () => svc.open());
 }
 
 async function renderTab() {
@@ -796,6 +799,9 @@ function commands() {
   for (const [k, v] of [['system', 'Igual ao Windows'], ['dark', 'Escuro'], ['light', 'Claro']]) {
     cmds.push({ grp: 'Tema', label: `Tema: ${v}`, icon: 'sun', run: () => { store.set('theme', k); applyLook(); renderChart(); }, keys: 'tema aparencia' });
   }
+  cmds.push({ grp: 'Ação', label: 'Central de Serviços', sub: 'tarefas, ligar/parar', icon: 'server', run: () => svc.open('servicos'), keys: 'servicos tarefas agendadas ligar parar iniciar eod' });
+  cmds.push({ grp: 'Ação', label: 'Configurar o Cérebro', sub: 'TradingAgents', icon: 'settings', run: () => svc.open('cerebro'), keys: 'cerebro tradingagents webhook configurar modo consultivo advisory' });
+  cmds.push({ grp: 'Ação', label: 'Testar conexões', sub: 'internet, Cérebro, webhook, Telegram', icon: 'play', run: () => svc.open('testes'), keys: 'testar teste conexao ping internet' });
   cmds.push({ grp: 'Ajuda', label: 'Atalhos de teclado', sub: '?', icon: 'keyboard', run: () => $('#dlg-help').showModal(), keys: 'ajuda teclado' });
   return cmds;
 }
@@ -864,6 +870,7 @@ function setupShortcuts() {
     else if (ev.key === '/') { ev.preventDefault(); $('#watch-filter').focus(); }
     else if (ev.key === '?') { $('#dlg-help').showModal(); }
     else if (ev.key.toLowerCase() === 'u') { openVersion(true); }
+    else if (ev.key.toLowerCase() === 's') { svc.open(); }
     else if (ev.key.toLowerCase() === 'r') { refreshAll(); toast('Dados recarregados.'); }
     else if (ev.key.toLowerCase() === 'f' && state.selected) {
       state.favs.has(state.selected) ? state.favs.delete(state.selected) : state.favs.add(state.selected);
@@ -897,4 +904,9 @@ function setupPolling() {
 paintIcons();
 applyLook(); setupSettings(); setupSplitters(); setupUpdate(); setupWatch(); setupChartControls(); setupTabs();
 setupPalette(); setupShortcuts(); setupPolling();
+const svc = setupServices({ api, toast, esc, ico, dmy, onChange: () => refreshAll() });
+svc.checkAlert();
+setInterval(() => { if (!document.hidden) svc.checkAlert(); }, 120_000);
+// link direto: http://127.0.0.1:8765/#servicos (ou #cerebro, #testes) abre a Central na aba
+{ const h = location.hash.slice(1); if (['servicos', 'cerebro', 'testes'].includes(h)) svc.open(h); }
 refreshAll();
