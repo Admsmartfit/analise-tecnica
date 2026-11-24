@@ -114,7 +114,9 @@ export function setupServices({ api, toast, esc, ico, dmy, onChange, onRestart }
         </div>
         <label class="chk"><input type="checkbox" name="allow_contingency" ${cfg.allow_contingency !== false ? 'checked' : ''}> <span>Aceitar decisões da "regra de contingência" (quando a IA do Cérebro está indisponível)</span></label>
         <label class="chk"><input type="checkbox" name="send_feedback" ${cfg.send_feedback !== false ? 'checked' : ''}> <span>Enviar o resultado de cada trade encerrado para o Cérebro aprender</span></label>
-        <p class="note">No Cockpit do Cérebro, a URL de callback deve ser <code>${esc(c.webhook_url || 'http://localhost:5000/webhook/decisao')}</code>.</p>
+        <p class="note">No Cockpit do Cérebro (Watchdog &amp; Ajustes → "URL de Callback do Robô Técnico"), use
+          <code>${esc(c.webhook_url || 'http://127.0.0.1:5000/webhook/decisao')}</code>. Use 127.0.0.1, não "localhost":
+          no Windows o localhost deixa cada chamada uns 2 s mais lenta.</p>
         <div class="dlg-actions"><button type="submit" class="primary">${ico('check')} Salvar e aplicar</button></div>
       </form>`;
   }

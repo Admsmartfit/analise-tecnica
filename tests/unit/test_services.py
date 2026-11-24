@@ -64,7 +64,7 @@ def test_save_cerebro_settings_from_the_form(env: tuple) -> None:
             "webhook_host": "0.0.0.0"}  # not editable from the form -> ignored
     assert client.post("/api/settings/cerebro", json=body).status_code == 403
     r = client.post("/api/settings/cerebro", json=body, headers=H).json()
-    assert r["ok"] and r["config"]["mode"] == "advisory" and r["config"]["base_url"] == "http://localhost:8000"
+    assert r["ok"] and r["config"]["mode"] == "advisory" and r["config"]["base_url"] == "http://127.0.0.1:8000"
     assert ("restart", "TS_Cerebro") in calls  # applied right away
     local = yaml.safe_load((root / "config" / "settings.local.yaml").read_text(encoding="utf-8"))
     assert local["cerebro"]["mode"] == "advisory" and "webhook_host" not in local["cerebro"]
@@ -105,6 +105,11 @@ def test_cerebro_found_on_another_port(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import FastAPI
 
     fake = FastAPI(title="TradingAgents B3 & Cockpit Web")
+
+    @fake.get("/api/health")
+    def health() -> dict:
+        return {"status": "ok", "version": "8.2.2"}
+
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -119,7 +124,7 @@ def test_cerebro_found_on_another_port(monkeypatch: pytest.MonkeyPatch) -> None:
         ok, msg, suggestion = sv.test_cerebro_reach("http://127.0.0.1:1")
         assert ok is False and suggestion == f"http://127.0.0.1:{port}" and "encontrado" in msg
         ok, msg, suggestion = sv.test_cerebro_reach(f"http://127.0.0.1:{port}")
-        assert ok is True and suggestion is None and "TradingAgents" in msg
+        assert ok is True and suggestion is None and "versão 8.2.2" in msg  # Cérebro >= 8.2: /api/health
     finally:
         server.should_exit = True
 

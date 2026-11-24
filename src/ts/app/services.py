@@ -152,8 +152,8 @@ def save_cerebro(root: Path, updates: dict[str, Any]) -> dict[str, Any]:
     if "base_url" in clean:
         u = str(clean["base_url"]).strip().rstrip("/")
         if not (u.startswith("http://") or u.startswith("https://")):
-            raise ValueError("O endereço do Cérebro deve começar com http:// (ex.: http://localhost:8000)")
-        clean["base_url"] = u
+            raise ValueError("O endereço do Cérebro deve começar com http:// (ex.: http://127.0.0.1:8000)")
+        clean["base_url"] = u.replace("://localhost", "://127.0.0.1")  # same machine, without the ~2 s penalty
     current = load_settings(root / "config" / "settings.yaml").cerebro.model_dump()
     try:
         CerebroSettings(**{**current, **clean})
@@ -179,6 +179,18 @@ def _cerebro_title(url: str, timeout: float) -> str | None:
         return None
 
 
+def _cerebro_health(url: str, timeout: float) -> str | None:
+    """Cérebro >= 8.2: GET /api/health -> {"status": "ok", "version": "8.2.2"}. Returns the version."""
+    import httpx
+
+    try:
+        r = httpx.get(url.rstrip("/") + "/api/health", timeout=timeout)
+        d = r.json() if r.status_code == 200 else {}
+        return str(d.get("version") or "?") if isinstance(d, dict) and d.get("status") == "ok" else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
 def discover_cerebro(webhook_port: int | None = None) -> str | None:
     """Look for the TradingAgents on this PC: common ports, IPv4 (127.0.0.1) — 'localhost' may go to IPv6."""
     import socket
@@ -198,6 +210,9 @@ def discover_cerebro(webhook_port: int | None = None) -> str | None:
 
 def test_cerebro_reach(base_url: str, webhook_port: int | None = None) -> tuple[bool, str, str | None]:
     """(ok, message, suggested_url). On failure, searches the usual ports and suggests where the Cérebro is."""
+    version = _cerebro_health(base_url, 6.0)
+    if version:
+        return True, f"Cérebro no ar em {base_url} (versão {version})", None
     title = _cerebro_title(base_url, 6.0)
     if title:
         return True, f"Cérebro respondendo em {base_url} ({title})", None

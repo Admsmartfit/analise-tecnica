@@ -379,7 +379,8 @@ def after_eod(conn: sqlite3.Connection, settings: Settings, closed_trades: list[
 # ============================================================================================ status / config
 def status(conn: sqlite3.Connection | None, cfg: CerebroSettings, probe: bool = True) -> dict[str, Any]:
     out: dict[str, Any] = {"enabled": cfg.enabled, "mode": cfg.mode, "base_url": cfg.base_url,
-                           "webhook_url": f"http://{'localhost' if cfg.webhook_host in ('127.0.0.1', '0.0.0.0') else cfg.webhook_host}"
+                           # 127.0.0.1, not "localhost": on Windows localhost costs ~2 s per call (IPv6 first)
+                           "webhook_url": f"http://{'127.0.0.1' if cfg.webhook_host in ('127.0.0.1', '0.0.0.0', '') else cfg.webhook_host}"
                                           f":{cfg.webhook_port}{cfg.webhook_path}"}
     if conn is not None:
         try:
