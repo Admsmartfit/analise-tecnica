@@ -184,7 +184,7 @@ async function restartTerminal() {
       try { const h = await fetch('/api/health', { cache: 'no-store' }); if (h.ok && i > 2) { location.reload(); return; } } catch { /* restarting */ }
     }
   } catch (e) {
-    toast(/not found/i.test(e.message)
+    toast(/not found|desconhecida/i.test(e.message)
       ? 'Este terminal é de uma versão anterior e não sabe se reiniciar: feche a janela e abra de novo pelo atalho "Trading System B3".'
       : e.message, 'err');
   }

@@ -6,7 +6,9 @@ opens another window on the running instance.
 """
 from __future__ import annotations
 
+import json
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -59,9 +61,61 @@ def ensure_streams(root: Path) -> Path | None:
     return log
 
 
+def _server_is_stale(port: int) -> bool:
+    """True when the terminal already running on ``port`` is older than the code on disk.
+
+    An old server (from before version reporting existed) has no ``server`` key in /api/status.
+    """
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=15) as r:
+            st = json.loads(r.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return False  # cannot tell: keep it (never kill something we do not understand)
+    srv = st.get("server")
+    return srv is None or bool(srv.get("stale"))
+
+
+def _listening_pid(port: int) -> int | None:
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[1] == f"127.0.0.1:{port}" and parts[3].upper() in ("LISTENING", "OUVINDO"):
+            return int(parts[4]) if parts[4].isdigit() else None
+    return None
+
+
+def _replace_stale_server(port: int) -> bool:
+    """Stop an outdated terminal server so a fresh one can start. Only ever touches a python process."""
+    pid = _listening_pid(port)
+    if pid is None:
+        return False
+    try:
+        info = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
+                              text=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        if "python" not in info.lower():
+            return False
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=10,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return False
+    for _ in range(50):
+        if _port_free(port):
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def run_ui(root: Path | None = None, port: int = DEFAULT_PORT, window: bool = True, restart: bool = False) -> int:
     ensure_streams(root or Path.cwd())
     url = f"http://127.0.0.1:{port}/"
+    if not restart and _running(port) and _server_is_stale(port):
+        # e.g. a terminal left running in the background while the automatic update installed a new version:
+        # reusing it would show the new screen on top of the old engine (things silently missing)
+        _replace_stale_server(port)
     if restart:
         # launched by the old instance right before it exits (after an update): wait for it to release the port,
         # otherwise we would just open another window on the OLD server
